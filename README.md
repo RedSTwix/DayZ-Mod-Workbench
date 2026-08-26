@@ -18,7 +18,7 @@ Na aba **Importar da Steam**, marque um ou mais mods instalados e escolha:
 - **COPIAR PARA BANCADA** para copiar PBOs, BISIGN e metadados;
 - **COPIAR + EXTRAIR PBOS** para também criar `source\NomeDoPBO` para cada PBO extraível.
 
-A lista mostra `Nome do mod │ Workshop ID` e a pesquisa aceita tanto o nome quanto o ID completo ou parcial.
+A lista combina os atalhos de `DayZ\!Workshop` com as instalações em `steamapps\workshop\content\221100`, elimina duplicatas pelo Workshop ID e mostra `Nome do mod │ Workshop ID`. A pesquisa aceita tanto o nome quanto o ID completo ou parcial.
 
 Cada mod recebe seu próprio projeto em `Desktop\edit mod`. Chaves públicas e privadas não são copiadas. Se o PBO estiver protegido/ofuscado, o programa conserva o PBO e o BISIGN e mostra um aviso, sem gerar um `source` ilegível.
 

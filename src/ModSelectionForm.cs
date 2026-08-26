@@ -16,12 +16,60 @@ namespace DayZModWorkbench
 
         public static ModChoice FromSteamPath(string path)
         {
+            string folderName = Path.GetFileName(path);
+            string workshopId;
+            string metadataName;
+            ReadWorkshopMetadata(path, out workshopId, out metadataName);
+            if (workshopId == "0") workshopId = string.Empty;
+            if (string.IsNullOrWhiteSpace(workshopId) && folderName.All(char.IsDigit)) workshopId = folderName;
+            string displayName = folderName;
+            if (folderName.All(char.IsDigit) && !string.IsNullOrWhiteSpace(metadataName))
+                displayName = metadataName.StartsWith("@", StringComparison.Ordinal) ? metadataName : "@" + metadataName;
             return new ModChoice
             {
-                Name = Path.GetFileName(path),
+                Name = displayName,
                 FullPath = path,
-                WorkshopId = ReadWorkshopId(path)
+                WorkshopId = workshopId
             };
+        }
+
+        public static List<ModChoice> DiscoverSteamMods(string workshopPath)
+        {
+            List<string> roots = new List<string>();
+            if (Directory.Exists(workshopPath)) roots.Add(workshopPath);
+            string contentPath = ResolveWorkshopContentPath(workshopPath);
+            if (Directory.Exists(contentPath) && !roots.Contains(contentPath, StringComparer.OrdinalIgnoreCase))
+                roots.Add(contentPath);
+
+            List<ModChoice> discovered = new List<ModChoice>();
+            Dictionary<string, ModChoice> byId = new Dictionary<string, ModChoice>(StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, ModChoice> byName = new Dictionary<string, ModChoice>(StringComparer.CurrentCultureIgnoreCase);
+            foreach (string root in roots)
+            {
+                bool aliasFolder = root.Equals(workshopPath, StringComparison.OrdinalIgnoreCase);
+                foreach (string path in Directory.GetDirectories(root))
+                {
+                    if (aliasFolder && Path.GetFileName(path).StartsWith("!", StringComparison.OrdinalIgnoreCase)) continue;
+                    ModChoice mod = FromSteamPath(path);
+                    string normalizedName = mod.Name.TrimStart('@').Trim();
+                    ModChoice existing;
+                    if (!string.IsNullOrWhiteSpace(mod.WorkshopId) && byId.TryGetValue(mod.WorkshopId, out existing)) continue;
+                    if (byName.TryGetValue(normalizedName, out existing))
+                    {
+                        if (string.IsNullOrWhiteSpace(existing.WorkshopId) && !string.IsNullOrWhiteSpace(mod.WorkshopId))
+                        {
+                            existing.WorkshopId = mod.WorkshopId;
+                            byId[mod.WorkshopId] = existing;
+                        }
+                        continue;
+                    }
+
+                    discovered.Add(mod);
+                    byName[normalizedName] = mod;
+                    if (!string.IsNullOrWhiteSpace(mod.WorkshopId)) byId[mod.WorkshopId] = mod;
+                }
+            }
+            return discovered.OrderBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
         }
 
         public bool Matches(string filter)
@@ -40,18 +88,37 @@ namespace DayZModWorkbench
                 : Name + "   │   Workshop ID: " + WorkshopId;
         }
 
-        private static string ReadWorkshopId(string modPath)
+        public static string ResolveWorkshopContentPath(string workshopPath)
         {
+            if (string.IsNullOrWhiteSpace(workshopPath)) return string.Empty;
+            DirectoryInfo current = new DirectoryInfo(workshopPath);
+            if (current.Name.Equals("221100", StringComparison.OrdinalIgnoreCase)
+                && current.Parent != null && current.Parent.Name.Equals("content", StringComparison.OrdinalIgnoreCase))
+                return current.FullName;
+
+            while (current != null && !current.Name.Equals("steamapps", StringComparison.OrdinalIgnoreCase))
+                current = current.Parent;
+            return current == null ? string.Empty : Path.Combine(current.FullName, "workshop", "content", "221100");
+        }
+
+        private static void ReadWorkshopMetadata(string modPath, out string workshopId, out string metadataName)
+        {
+            workshopId = string.Empty;
+            metadataName = string.Empty;
             string meta = Path.Combine(modPath, "meta.cpp");
-            if (!File.Exists(meta)) return string.Empty;
+            if (!File.Exists(meta)) return;
             try
             {
-                Match match = Regex.Match(File.ReadAllText(meta), @"\bpublishedid\s*=\s*[\""']?(\d+)", RegexOptions.IgnoreCase);
-                return match.Success ? match.Groups[1].Value : string.Empty;
+                string contents = File.ReadAllText(meta);
+                Match idMatch = Regex.Match(contents, @"\bpublishedid\s*=\s*[\""']?(\d+)", RegexOptions.IgnoreCase);
+                Match nameMatch = Regex.Match(contents, "\\bname\\s*=\\s*\\\"([^\\\"]+)\\\"", RegexOptions.IgnoreCase);
+                if (idMatch.Success) workshopId = idMatch.Groups[1].Value;
+                if (nameMatch.Success) metadataName = nameMatch.Groups[1].Value.Trim();
             }
             catch
             {
-                return string.Empty;
+                workshopId = string.Empty;
+                metadataName = string.Empty;
             }
         }
     }
@@ -98,11 +165,7 @@ namespace DayZModWorkbench
 
         public static ModSelectionForm CreateFromPaths(string workshopPath, string benchPath, string defaultSteamPaths, string defaultBenchPaths)
         {
-            List<ModChoice> steam = Directory.Exists(workshopPath)
-                ? Directory.GetDirectories(workshopPath)
-                    .Where(path => !Path.GetFileName(path).StartsWith("!", StringComparison.OrdinalIgnoreCase))
-                    .Select(ModChoice.FromSteamPath).ToList()
-                : new List<ModChoice>();
+            List<ModChoice> steam = ModChoice.DiscoverSteamMods(workshopPath);
             List<ModChoice> bench = Directory.Exists(benchPath)
                 ? Directory.GetDirectories(benchPath)
                     .Select(path => new ModChoice { Name = Path.GetFileName(path), FullPath = path }).ToList()
