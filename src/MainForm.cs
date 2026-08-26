@@ -494,15 +494,7 @@ namespace DayZModWorkbench
         private void LoadSteamImportMods()
         {
             _steamImportMods.Clear();
-            if (Directory.Exists(_settings.WorkshopPath))
-            {
-                foreach (string directory in Directory.GetDirectories(_settings.WorkshopPath)
-                    .Where(path => !Path.GetFileName(path).StartsWith("!", StringComparison.OrdinalIgnoreCase))
-                    .OrderBy(path => Path.GetFileName(path), StringComparer.CurrentCultureIgnoreCase))
-                {
-                    _steamImportMods.Add(ModChoice.FromSteamPath(directory));
-                }
-            }
+            _steamImportMods.AddRange(ModChoice.DiscoverSteamMods(_settings.WorkshopPath));
             RefreshSteamImportList();
             Log("Lista Steam atualizada: " + _steamImportMods.Count + " mod(s).", _accent);
         }
@@ -1178,13 +1170,9 @@ namespace DayZModWorkbench
             try
             {
                 DiagnosticLog("Clique em Abrir com DayZ Editor recebido.");
-                if (!Directory.Exists(_settings.WorkshopPath))
-                    throw new DirectoryNotFoundException("Pasta !Workshop não encontrada: " + _settings.WorkshopPath);
-
-                List<ModChoice> steamMods = Directory.GetDirectories(_settings.WorkshopPath)
-                    .Where(path => !Path.GetFileName(path).StartsWith("!", StringComparison.OrdinalIgnoreCase))
-                    .Select(ModChoice.FromSteamPath)
-                    .ToList();
+                List<ModChoice> steamMods = ModChoice.DiscoverSteamMods(_settings.WorkshopPath);
+                if (steamMods.Count == 0)
+                    throw new DirectoryNotFoundException("Nenhum mod foi encontrado em !Workshop nem em workshop\\content\\221100.");
                 List<ModChoice> benchMods = Directory.GetDirectories(_settings.BenchPath)
                     .Select(path => new ModChoice { Name = Path.GetFileName(path), FullPath = path })
                     .ToList();
