@@ -1,0 +1,26 @@
+# Compilados e artefatos do Visual Studio
+bin/
+obj/
+.vs/
+*.exe
+*.dll
+*.pdb
+*.cache
+*.user
+*.suo
+
+# Configuração e registros locais
+settings.ini
+*.log
+
+# Arquivos de mods e assinaturas
+*.pbo
+*.bisign
+*.bikey
+*.biprivatekey
+
+# Arquivos temporários
+*.tmp
+*.bak
+Thumbs.db
+Desktop.ini
