@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Windows.Forms;
 
 namespace DayZModWorkbench
@@ -11,7 +12,48 @@ namespace DayZModWorkbench
     {
         public string Name;
         public string FullPath;
-        public override string ToString() { return Name; }
+        public string WorkshopId;
+
+        public static ModChoice FromSteamPath(string path)
+        {
+            return new ModChoice
+            {
+                Name = Path.GetFileName(path),
+                FullPath = path,
+                WorkshopId = ReadWorkshopId(path)
+            };
+        }
+
+        public bool Matches(string filter)
+        {
+            if (string.IsNullOrWhiteSpace(filter)) return true;
+            string value = filter.Trim();
+            return Name.IndexOf(value, StringComparison.CurrentCultureIgnoreCase) >= 0
+                || (!string.IsNullOrWhiteSpace(WorkshopId)
+                    && WorkshopId.IndexOf(value, StringComparison.OrdinalIgnoreCase) >= 0);
+        }
+
+        public override string ToString()
+        {
+            return string.IsNullOrWhiteSpace(WorkshopId)
+                ? Name
+                : Name + "   │   Workshop ID: " + WorkshopId;
+        }
+
+        private static string ReadWorkshopId(string modPath)
+        {
+            string meta = Path.Combine(modPath, "meta.cpp");
+            if (!File.Exists(meta)) return string.Empty;
+            try
+            {
+                Match match = Regex.Match(File.ReadAllText(meta), @"\bpublishedid\s*=\s*[\""']?(\d+)", RegexOptions.IgnoreCase);
+                return match.Success ? match.Groups[1].Value : string.Empty;
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
     }
 
     internal sealed class ModSelectionForm : Form
@@ -59,7 +101,7 @@ namespace DayZModWorkbench
             List<ModChoice> steam = Directory.Exists(workshopPath)
                 ? Directory.GetDirectories(workshopPath)
                     .Where(path => !Path.GetFileName(path).StartsWith("!", StringComparison.OrdinalIgnoreCase))
-                    .Select(path => new ModChoice { Name = Path.GetFileName(path), FullPath = path }).ToList()
+                    .Select(ModChoice.FromSteamPath).ToList()
                 : new List<ModChoice>();
             List<ModChoice> bench = Directory.Exists(benchPath)
                 ? Directory.GetDirectories(benchPath)
@@ -225,7 +267,7 @@ namespace DayZModWorkbench
                 list.Items.Clear();
                 IEnumerable<ModChoice> visible = all;
                 if (!string.IsNullOrWhiteSpace(filter))
-                    visible = visible.Where(x => x.Name.IndexOf(filter.Trim(), StringComparison.CurrentCultureIgnoreCase) >= 0);
+                    visible = visible.Where(x => x.Matches(filter));
                 foreach (ModChoice item in visible) list.Items.Add(item, selected.Contains(item.FullPath));
             }
             finally

@@ -500,7 +500,7 @@ namespace DayZModWorkbench
                     .Where(path => !Path.GetFileName(path).StartsWith("!", StringComparison.OrdinalIgnoreCase))
                     .OrderBy(path => Path.GetFileName(path), StringComparer.CurrentCultureIgnoreCase))
                 {
-                    _steamImportMods.Add(new ModChoice { Name = Path.GetFileName(directory), FullPath = directory });
+                    _steamImportMods.Add(ModChoice.FromSteamPath(directory));
                 }
             }
             RefreshSteamImportList();
@@ -515,8 +515,7 @@ namespace DayZModWorkbench
             try
             {
                 _steamImportList.Items.Clear();
-                foreach (ModChoice mod in _steamImportMods.Where(item => string.IsNullOrWhiteSpace(filter)
-                    || item.Name.IndexOf(filter, StringComparison.CurrentCultureIgnoreCase) >= 0))
+                foreach (ModChoice mod in _steamImportMods.Where(item => item.Matches(filter)))
                 {
                     _steamImportList.Items.Add(mod, _steamImportSelected.Contains(mod.FullPath));
                 }
@@ -1184,7 +1183,7 @@ namespace DayZModWorkbench
 
                 List<ModChoice> steamMods = Directory.GetDirectories(_settings.WorkshopPath)
                     .Where(path => !Path.GetFileName(path).StartsWith("!", StringComparison.OrdinalIgnoreCase))
-                    .Select(path => new ModChoice { Name = Path.GetFileName(path), FullPath = path })
+                    .Select(ModChoice.FromSteamPath)
                     .ToList();
                 List<ModChoice> benchMods = Directory.GetDirectories(_settings.BenchPath)
                     .Select(path => new ModChoice { Name = Path.GetFileName(path), FullPath = path })
