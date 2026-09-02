@@ -8,6 +8,11 @@ namespace DayZModWorkbench
     {
         public string BenchPath;
         public string BankRevPath;
+        public string CfgConvertPath;
+        public string PythonPath;
+        public string OdolConverterPath;
+        public string AddonBuilderPath;
+        public string ProjectDrivePath;
         public string FileBankPath;
         public string SignerPath;
         public string PrivateKeyPath;
@@ -17,7 +22,6 @@ namespace DayZModWorkbench
         public string WorkshopPath;
         public string EditorDependencies;
         public string ServerKeysPath;
-        public string BackupPath;
         public string ExtraLaunchArgs;
 
         public static string SettingsFile
@@ -35,6 +39,11 @@ namespace DayZModWorkbench
             {
                 BenchPath = Path.Combine(desktop, "edit mod"),
                 BankRevPath = Path.Combine(tools, @"PboUtils\BankRev.exe"),
+                CfgConvertPath = Path.Combine(tools, @"CfgConvert\CfgConvert.exe"),
+                PythonPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\Python\Python312\python.exe"),
+                OdolConverterPath = OdolConverterProvisioner.ManagedAddonPath,
+                AddonBuilderPath = Path.Combine(tools, @"AddonBuilder\AddonBuilder.exe"),
+                ProjectDrivePath = @"P:\",
                 FileBankPath = Path.Combine(tools, @"PboUtils\FileBank.exe"),
                 SignerPath = Path.Combine(tools, @"DsUtils\DSSignFile.exe"),
                 PrivateKeyPath = string.Empty,
@@ -44,7 +53,6 @@ namespace DayZModWorkbench
                 WorkshopPath = workshop,
                 EditorDependencies = Path.Combine(workshop, "@CF") + ";" + Path.Combine(workshop, "@Dabs Framework"),
                 ServerKeysPath = @"C:\DayZServer\keys",
-                BackupPath = Path.Combine(desktop, @"Mods backup\DayZ Mod Workbench"),
                 ExtraLaunchArgs = "-noPause -noSplash -skipIntro -doLogs -world=empty"
             };
         }
@@ -71,6 +79,13 @@ namespace DayZModWorkbench
 
             result.BenchPath = Get(values, "BenchPath", result.BenchPath);
             result.BankRevPath = Get(values, "BankRevPath", result.BankRevPath);
+            result.CfgConvertPath = Get(values, "CfgConvertPath", result.CfgConvertPath);
+            result.PythonPath = Get(values, "PythonPath", result.PythonPath);
+            // O conversor é um addon gerenciado e sempre fica junto ao Workbench.
+            // Valores antigos em P:\ ou LocalAppData são migrados pelo provisionador.
+            result.OdolConverterPath = OdolConverterProvisioner.ManagedAddonPath;
+            result.AddonBuilderPath = Get(values, "AddonBuilderPath", result.AddonBuilderPath);
+            result.ProjectDrivePath = Get(values, "ProjectDrivePath", result.ProjectDrivePath);
             result.FileBankPath = Get(values, "FileBankPath", result.FileBankPath);
             result.SignerPath = Get(values, "SignerPath", result.SignerPath);
             result.PrivateKeyPath = Get(values, "PrivateKeyPath", result.PrivateKeyPath);
@@ -80,7 +95,6 @@ namespace DayZModWorkbench
             result.WorkshopPath = Get(values, "WorkshopPath", result.WorkshopPath);
             result.EditorDependencies = Get(values, "EditorDependencies", result.EditorDependencies);
             result.ServerKeysPath = Get(values, "ServerKeysPath", result.ServerKeysPath);
-            result.BackupPath = Get(values, "BackupPath", result.BackupPath);
             result.ExtraLaunchArgs = Get(values, "ExtraLaunchArgs", result.ExtraLaunchArgs);
             return result;
         }
@@ -98,6 +112,11 @@ namespace DayZModWorkbench
                 "# DayZ Mod Workbench - configurações locais",
                 "BenchPath=" + BenchPath,
                 "BankRevPath=" + BankRevPath,
+                "CfgConvertPath=" + CfgConvertPath,
+                "PythonPath=" + PythonPath,
+                "OdolConverterPath=" + OdolConverterPath,
+                "AddonBuilderPath=" + AddonBuilderPath,
+                "ProjectDrivePath=" + ProjectDrivePath,
                 "FileBankPath=" + FileBankPath,
                 "SignerPath=" + SignerPath,
                 "PrivateKeyPath=" + PrivateKeyPath,
@@ -107,7 +126,6 @@ namespace DayZModWorkbench
                 "WorkshopPath=" + WorkshopPath,
                 "EditorDependencies=" + EditorDependencies,
                 "ServerKeysPath=" + ServerKeysPath,
-                "BackupPath=" + BackupPath,
                 "ExtraLaunchArgs=" + ExtraLaunchArgs
             };
             File.WriteAllLines(SettingsFile, lines);

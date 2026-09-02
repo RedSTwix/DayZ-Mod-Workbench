@@ -42,10 +42,16 @@ namespace DayZModWorkbench
         private readonly List<ModChoice> _steamImportMods = new List<ModChoice>();
         private readonly HashSet<string> _steamImportSelected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly List<string> _steamImportWarnings = new List<string>();
+        private readonly List<string> _steamImportVerifications = new List<string>();
         private bool _updatingSteamImportList;
 
         private TextBox _benchText;
         private TextBox _bankRevText;
+        private TextBox _cfgConvertText;
+        private TextBox _pythonText;
+        private TextBox _odolConverterText;
+        private TextBox _addonBuilderText;
+        private TextBox _projectDriveText;
         private TextBox _fileBankText;
         private TextBox _signerText;
         private TextBox _dayZText;
@@ -54,8 +60,12 @@ namespace DayZModWorkbench
         private TextBox _workshopText;
         private TextBox _editorDependenciesText;
         private TextBox _serverKeysText;
-        private TextBox _backupText;
         private TextBox _launchArgsText;
+        private Button _workDriveButton;
+        private string _privateKeyStoreNotice;
+        private SplitContainer _projectSplit;
+
+        private const int DefaultPboPanelWidth = 360;
 
         private readonly List<Control> _operationControls = new List<Control>();
         private bool _busy;
@@ -63,6 +73,22 @@ namespace DayZModWorkbench
         public MainForm()
         {
             _settings = ToolSettings.Load();
+            try
+            {
+                string previousKey = _settings.PrivateKeyPath;
+                _settings.PrivateKeyPath = PrivateKeyStore.EnsureLocal(previousKey);
+                if (!string.IsNullOrWhiteSpace(_settings.PrivateKeyPath) &&
+                    !_settings.PrivateKeyPath.Equals(previousKey ?? string.Empty, StringComparison.OrdinalIgnoreCase))
+                {
+                    _settings.Save();
+                    _privateKeyStoreNotice = "Chave privada disponibilizada na pasta local do Workbench: " + _settings.PrivateKeyPath;
+                }
+            }
+            catch (Exception ex)
+            {
+                _settings.PrivateKeyPath = string.Empty;
+                _privateKeyStoreNotice = "Não foi possível preparar a pasta local de chaves: " + ex.Message;
+            }
             Text = "DayZ Mod Workbench — SharpAxe";
             StartPosition = FormStartPosition.CenterScreen;
             MinimumSize = new Size(1040, 720);
@@ -74,8 +100,14 @@ namespace DayZModWorkbench
             BuildInterface();
             ApplySettingsToFields();
             ApplyTheme(this);
+            if (!string.IsNullOrWhiteSpace(_privateKeyStoreNotice))
+                Log(_privateKeyStoreNotice, string.IsNullOrWhiteSpace(_settings.PrivateKeyPath) ? Color.Gold : _success);
             RefreshProjects();
             LoadSteamImportMods();
+            RefreshWorkDriveButton();
+            Activated += delegate { RefreshWorkDriveButton(); };
+            _tabs.SelectedIndexChanged += delegate { RefreshWorkDriveButton(); };
+            Shown += delegate { ApplyDefaultProjectSplit(); };
         }
 
         private void BuildInterface()
@@ -169,12 +201,12 @@ namespace DayZModWorkbench
         private TabPage BuildProjectTab()
         {
             TabPage page = new TabPage("Extrair e compilar");
-            SplitContainer split = new SplitContainer
+            _projectSplit = new SplitContainer
             {
                 Dock = DockStyle.Fill,
-                SplitterDistance = 465,
                 FixedPanel = FixedPanel.Panel1
             };
+            SplitContainer split = _projectSplit;
             page.Controls.Add(split);
 
             GroupBox pboGroup = new GroupBox { Text = "PBOs encontrados no projeto", Dock = DockStyle.Fill, Padding = new Padding(10) };
@@ -200,11 +232,11 @@ namespace DayZModWorkbench
             split.Panel1.Controls.Add(pboGroup);
 
             GroupBox buildGroup = new GroupBox { Text = "Compilar source → PBO / BISIGN", Dock = DockStyle.Fill, Padding = new Padding(12) };
-            TableLayoutPanel build = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 8 };
+            TableLayoutPanel build = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 9 };
             build.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 145));
             build.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             build.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 105));
-            for (int i = 0; i < 6; i++) build.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
+            for (int i = 0; i < 7; i++) build.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
             build.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             build.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
 
@@ -221,17 +253,17 @@ namespace DayZModWorkbench
             build.Controls.Add(_prefixText, 1, 1);
             build.SetColumnSpan(_prefixText, 2);
 
-            build.Controls.Add(FieldLabel("Chave privada:"), 0, 2);
-            _privateKeyText = new TextBox { Dock = DockStyle.Fill };
+            build.Controls.Add(FieldLabel("Chave privada (keys):"), 0, 2);
+            _privateKeyText = new TextBox { Dock = DockStyle.Fill, ReadOnly = true };
             build.Controls.Add(_privateKeyText, 1, 2);
-            Button keyBrowse = MakeButton("Procurar", _field);
-            keyBrowse.Click += delegate { BrowseFile(_privateKeyText, "Chave privada DayZ|*.biprivatekey|Todos os arquivos|*.*"); };
+            Button keyBrowse = MakeButton("Adicionar", _field);
+            keyBrowse.Click += delegate { ImportPrivateKey(); };
             build.Controls.Add(keyBrowse, 2, 2);
 
             build.Controls.Add(FieldLabel("Saída:"), 0, 3);
             Label output = new Label
             {
-                Text = "Projeto\\PBO  (a chave nunca é copiada)",
+                Text = "Projeto\\PBO  (chave permanece em Workbench\\keys)",
                 Dock = DockStyle.Fill,
                 ForeColor = _success,
                 TextAlign = ContentAlignment.MiddleLeft
@@ -239,40 +271,62 @@ namespace DayZModWorkbench
             build.Controls.Add(output, 1, 3);
             build.SetColumnSpan(output, 2);
 
+            Button prepareSource = MakeButton("Desbinarizar source selecionado", Color.FromArgb(155, 90, 230));
+            prepareSource.Click += async delegate { await PrepareSelectedSource(); };
+            build.Controls.Add(prepareSource, 1, 4);
+            build.SetColumnSpan(prepareSource, 2);
+            _operationControls.Add(prepareSource);
+
             Button buildOnly = MakeButton("Compilar PBO", _field);
             buildOnly.Click += async delegate { await BuildSelectedSource(false); };
-            build.Controls.Add(buildOnly, 1, 4);
+            build.Controls.Add(buildOnly, 1, 5);
             Button buildSign = MakeButton("PBO + BISIGN", _success);
             buildSign.Click += async delegate { await BuildSelectedSource(true); };
-            build.Controls.Add(buildSign, 2, 4);
+            build.Controls.Add(buildSign, 2, 5);
             _operationControls.Add(buildOnly);
             _operationControls.Add(buildSign);
 
             Button buildAll = MakeButton("Compilar e assinar todos os sources", _accent);
             buildAll.Click += async delegate { await BuildAllSources(); };
-            build.Controls.Add(buildAll, 1, 5);
+            build.Controls.Add(buildAll, 1, 6);
             build.SetColumnSpan(buildAll, 2);
             _operationControls.Add(buildAll);
 
             Label note = new Label
             {
-                Text = "BankRev extrai todos os arquivos existentes no PBO. Config.bin e modelos ODOL permanecem binarizados quando o autor original os publicou dessa forma.",
+                Text = "Após extrair, o Workbench converte arquivos RaP e reconstrói ODOL53/54/55 como MLOD, recuperando model.cfg animado. Se a validação falhar, preserva o ODOL original.",
                 Dock = DockStyle.Fill,
                 ForeColor = Color.Silver,
                 AutoSize = false
             };
-            build.Controls.Add(note, 0, 6);
+            build.Controls.Add(note, 0, 7);
             build.SetColumnSpan(note, 3);
 
             Button verify = MakeButton("Verificar assinaturas da pasta PBO", _field);
             verify.Click += async delegate { await VerifyProjectSignatures(); };
-            build.Controls.Add(verify, 1, 7);
+            build.Controls.Add(verify, 1, 8);
             build.SetColumnSpan(verify, 2);
             _operationControls.Add(verify);
+
+            _workDriveButton = MakeButton("Montar P:", Color.FromArgb(155, 90, 230));
+            _workDriveButton.Click += async delegate { await ToggleWorkDrive(); };
+            build.Controls.Add(_workDriveButton, 0, 8);
+            _operationControls.Add(_workDriveButton);
 
             buildGroup.Controls.Add(build);
             split.Panel2.Controls.Add(buildGroup);
             return page;
+        }
+
+        private void ApplyDefaultProjectSplit()
+        {
+            if (_projectSplit == null || _projectSplit.ClientSize.Width <= 0) return;
+            _projectSplit.Panel1MinSize = 300;
+            _projectSplit.Panel2MinSize = 600;
+            int maximum = _projectSplit.ClientSize.Width - _projectSplit.SplitterWidth - _projectSplit.Panel2MinSize;
+            int desired = Math.Min(DefaultPboPanelWidth, maximum);
+            if (desired >= _projectSplit.Panel1MinSize)
+                _projectSplit.SplitterDistance = desired;
         }
 
         private TabPage BuildLaunchTab()
@@ -359,17 +413,26 @@ namespace DayZModWorkbench
                 Padding = new Padding(14),
                 AutoScroll = true,
                 ColumnCount = 3,
-                RowCount = 14
+                RowCount = 17
             };
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180));
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 105));
-            for (int i = 0; i < 13; i++) grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 39));
+            for (int i = 0; i < 16; i++) grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 39));
             grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
 
             int row = 0;
             _benchText = AddPathRow(grid, row++, "Bancada de mods:", true, false);
             _bankRevText = AddPathRow(grid, row++, "BankRev.exe:", false, false);
+            _cfgConvertText = AddPathRow(grid, row++, "CfgConvert.exe:", false, false);
+            _pythonText = AddPathRow(grid, row++, "Python.exe:", false, false);
+            int odolAddonRow = row++;
+            _odolConverterText = AddPathRow(grid, odolAddonRow, "Addon ODOL.py:", false, true);
+            _odolConverterText.ReadOnly = true;
+            Label odolAddonHint = grid.GetControlFromPosition(2, odolAddonRow) as Label;
+            if (odolAddonHint != null) odolAddonHint.Text = "gerenciado";
+            _addonBuilderText = AddPathRow(grid, row++, "AddonBuilder.exe:", false, false);
+            _projectDriveText = AddPathRow(grid, row++, "Work drive / projeto:", true, false);
             _fileBankText = AddPathRow(grid, row++, "FileBank.exe:", false, false);
             _signerText = AddPathRow(grid, row++, "DSSignFile.exe:", false, false);
             _dayZText = AddPathRow(grid, row++, "DayZ_x64.exe:", false, false);
@@ -378,7 +441,6 @@ namespace DayZModWorkbench
             _workshopText = AddPathRow(grid, row++, "Pasta !Workshop:", true, false);
             _editorDependenciesText = AddPathRow(grid, row++, "Dependências Editor:", false, true);
             _serverKeysText = AddPathRow(grid, row++, "Chaves públicas servidor:", true, false);
-            _backupText = AddPathRow(grid, row++, "Pasta de backups:", true, false);
 
             grid.Controls.Add(FieldLabel("Argumentos padrão:"), 0, row);
             _launchArgsText = new TextBox { Dock = DockStyle.Fill };
@@ -392,6 +454,9 @@ namespace DayZModWorkbench
             Button validate = MakeButton("Validar", _success);
             validate.Click += delegate { ValidateSettings(true); };
             grid.Controls.Add(validate, 2, row);
+            Button autoDetect = MakeButton("Auto detectar", Color.FromArgb(155, 90, 230));
+            autoDetect.Click += delegate { AutoDetectSettings(); };
+            grid.Controls.Add(autoDetect, 0, row);
             page.Controls.Add(grid);
             return page;
         }
@@ -538,6 +603,7 @@ namespace DayZModWorkbench
             {
                 SetBusy(true, extract ? "Copiando e extraindo mods Steam" : "Copiando mods Steam");
                 _steamImportWarnings.Clear();
+                _steamImportVerifications.Clear();
                 List<string> importedProjects = new List<string>();
                 foreach (ModChoice mod in selected)
                 {
@@ -550,9 +616,16 @@ namespace DayZModWorkbench
                 RefreshSteamImportList();
                 string warnings = _steamImportWarnings.Count == 0
                     ? string.Empty
-                    : "\n\nAvisos:\n" + string.Join("\n", _steamImportWarnings.Select(item => "• " + item).ToArray());
+                    : "\n\nPendências para uma source totalmente editável:\n" +
+                        string.Join("\n", _steamImportWarnings.Select(item => "• " + item).ToArray());
+                string verifications = _steamImportVerifications.Count == 0
+                    ? string.Empty
+                    : "\n\nVerificações de integridade:\n" +
+                        string.Join("\n", _steamImportVerifications.Select(item => "✓ " + item).ToArray());
                 MessageBox.Show(this,
-                    "Importação concluída:\n\n" + string.Join("\n", importedProjects) + warnings,
+                    "Importação concluída. Os arquivos dos PBOs foram preservados; as pendências abaixo " +
+                    "indicam apenas formatos que ainda não ficaram editáveis.\n\n" +
+                    string.Join("\n", importedProjects) + verifications + warnings,
                     "Importar da Steam", MessageBoxButtons.OK,
                     _steamImportWarnings.Count == 0 ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
             }
@@ -580,22 +653,13 @@ namespace DayZModWorkbench
 
             Directory.CreateDirectory(projectRoot);
             Directory.CreateDirectory(pboOutput);
-            string backupRoot = Path.Combine(_settings.BackupPath, "Steam Imports", projectName, DateTime.Now.ToString("yyyyMMdd_HHmmss"));
-            bool createdBackup = false;
 
             Log("Importando " + mod.Name + " (" + pbos.Length + " PBOs)", _accent);
             foreach (string pbo in pbos)
             {
                 string destinationPbo = Path.Combine(pboOutput, Path.GetFileName(pbo));
-                if (File.Exists(destinationPbo))
-                {
-                    Directory.CreateDirectory(backupRoot);
-                    File.Copy(destinationPbo, Path.Combine(backupRoot, Path.GetFileName(destinationPbo)), true);
-                    foreach (string oldSign in Directory.GetFiles(pboOutput, Path.GetFileName(pbo) + ".*.bisign"))
-                        File.Copy(oldSign, Path.Combine(backupRoot, Path.GetFileName(oldSign)), true);
-                    createdBackup = true;
-                }
-
+                foreach (string oldSign in Directory.GetFiles(pboOutput, Path.GetFileName(pbo) + ".*.bisign"))
+                    File.Delete(oldSign);
                 File.Copy(pbo, destinationPbo, true);
                 foreach (string signature in Directory.GetFiles(addons, Path.GetFileName(pbo) + ".*.bisign"))
                     File.Copy(signature, Path.Combine(pboOutput, Path.GetFileName(signature)), true);
@@ -605,7 +669,6 @@ namespace DayZModWorkbench
 
             CopyIfExists(Path.Combine(mod.FullPath, "mod.cpp"), Path.Combine(projectRoot, "mod.cpp"));
             CopyIfExists(Path.Combine(mod.FullPath, "meta.cpp"), Path.Combine(projectRoot, "meta.cpp"));
-            if (createdBackup) Log("Versão anterior preservada em: " + backupRoot, Color.Gold);
             Log("Importado para: " + projectRoot, _success);
             return projectRoot;
         }
@@ -618,6 +681,7 @@ namespace DayZModWorkbench
                     || item.Name.TrimStart('@').Equals(modName.TrimStart('@'), StringComparison.OrdinalIgnoreCase));
                 if (mod == null) throw new InvalidOperationException("Mod Steam não encontrado: " + modName);
                 _steamImportWarnings.Clear();
+                _steamImportVerifications.Clear();
                 SetBusy(true, "Teste interno: copiando e extraindo " + mod.Name);
                 string project = await ImportSteamMod(mod, true);
                 string status = _steamImportWarnings.Count == 0 ? "APROVADO" : "APROVADO COM AVISO";
@@ -638,6 +702,45 @@ namespace DayZModWorkbench
             }
         }
 
+        internal async Task<bool> RunAutomatedSourcePreparation(string sourcePath)
+        {
+            try
+            {
+                if (!Directory.Exists(sourcePath)) throw new DirectoryNotFoundException("Source não encontrado: " + sourcePath);
+                DirectoryInfo sourceParent = Directory.GetParent(sourcePath);
+                if (sourceParent == null || !sourceParent.Name.Equals("source", StringComparison.OrdinalIgnoreCase) || sourceParent.Parent == null)
+                    throw new InvalidOperationException("O caminho de teste deve ser uma pasta Projeto\\source\\NomeDoPBO.");
+
+                SetBusy(true, "Teste interno: desbinarizando " + Path.GetFileName(sourcePath));
+                SourcePreparationResult preparation = await SourcePreparer.PrepareAsync(sourcePath,
+                    _settings.CfgConvertPath, LogLine);
+                string converterPath = preparation.OdolPreserved > 0
+                    ? await EnsureOdolConverterAvailable()
+                    : _settings.OdolConverterPath;
+                OdolReconstructionResult reconstruction = await OdolSourceReconstructor.ReconstructAsync(sourcePath,
+                    _settings.PythonPath, converterPath, LogLine);
+                if (reconstruction.Changed)
+                    ReplaceDirectoryByMove(reconstruction.OutputRoot, sourcePath);
+                List<string> warnings = new List<string>(preparation.Warnings);
+                warnings.AddRange(reconstruction.Warnings);
+                string details = preparation.Summary + " " + reconstruction.Summary +
+                    (warnings.Count == 0 ? string.Empty : " | " + string.Join(" | ", warnings.ToArray()));
+                Log("TESTE INTERNO SOURCE: " + details, warnings.Count == 0 ? _success : Color.Gold);
+                DiagnosticLog("Teste de preparação de source: " + sourcePath + " | " + details);
+                return warnings.Count == 0;
+            }
+            catch (Exception ex)
+            {
+                Log("TESTE INTERNO SOURCE FALHOU: " + ex, Color.Salmon);
+                DiagnosticLog("Teste de preparação de source falhou: " + ex);
+                return false;
+            }
+            finally
+            {
+                SetBusy(false, "Pronto");
+            }
+        }
+
         private async Task ExtractImportedPbo(string projectRoot, string pbo)
         {
             if (!File.Exists(_settings.BankRevPath)) throw new FileNotFoundException("BankRev.exe não encontrado.", _settings.BankRevPath);
@@ -646,16 +749,42 @@ namespace DayZModWorkbench
                 "-p " + ProcessRunner.Quote(pbo), projectRoot, LogLine);
             string prefix = ParsePrefix(properties.Output);
             if (string.IsNullOrWhiteSpace(prefix)) prefix = pboName;
+            string tempRoot = Path.Combine(Path.GetTempPath(), "DayZModWorkbench", "SteamImport_" + Guid.NewGuid().ToString("N"));
 
-            if (properties.Output.IndexOf("= obfuscated", StringComparison.OrdinalIgnoreCase) >= 0)
+            if (IsProtectedPbo(properties.Output))
             {
-                string warning = pboName + ": PBO protegido/ofuscado. O PBO e o BISIGN foram copiados, mas o source não pode ser extraído de forma utilizável.";
-                _steamImportWarnings.Add(warning);
-                Log(warning, Color.Gold);
+                Directory.CreateDirectory(tempRoot);
+                try
+                {
+                    Log(pboName + ": ofuscação detectada; iniciando recuperação pelo addon Python.", _accent);
+                    PboSourceRecoveryResult recovery = await RecoverProtectedPbo(pbo, tempRoot);
+                    if (!string.IsNullOrWhiteSpace(recovery.Prefix)) prefix = recovery.Prefix;
+                    string sourceRoot = Path.Combine(projectRoot, "source");
+                    string destination = Path.Combine(sourceRoot, pboName);
+                    ReplaceDirectoryByCopy(recovery.SourceRoot, destination);
+                    SaveProjectPrefix(projectRoot, pboName, prefix);
+                    Log("PBO ofuscado recuperado: " + pboName + " → " + destination + " — " + recovery.Summary, _success);
+                    foreach (string item in recovery.Warnings)
+                    {
+                        string warning = pboName + ": " + item;
+                        _steamImportWarnings.Add(warning);
+                        Log(warning, Color.Gold);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    string warning = pboName + ": recuperação do PBO ofuscado falhou; original preservado. " + ex.Message;
+                    _steamImportWarnings.Add(warning);
+                    Log(warning, Color.Gold);
+                }
+                finally
+                {
+                    TryDeleteDirectory(tempRoot);
+                }
                 return;
             }
 
-            string tempRoot = Path.Combine(Path.GetTempPath(), "DayZModWorkbench", "SteamImport_" + Guid.NewGuid().ToString("N"));
+            if (!File.Exists(_settings.CfgConvertPath)) throw new FileNotFoundException("CfgConvert.exe não encontrado.", _settings.CfgConvertPath);
             Directory.CreateDirectory(tempRoot);
             try
             {
@@ -663,21 +792,100 @@ namespace DayZModWorkbench
                     "-f " + ProcessRunner.Quote(tempRoot) + " -t " + ProcessRunner.Quote(pbo), projectRoot, LogLine);
                 if (result.ExitCode != 0) throw new InvalidOperationException("BankRev terminou com código " + result.ExitCode + " ao extrair " + pboName);
 
-                string extractedRoot = FindExtractedRoot(tempRoot, prefix);
+                string extractedRoot = FindExtractedRoot(tempRoot, prefix, pboName);
                 if (extractedRoot == null) throw new InvalidOperationException("A extração de " + pboName + " ficou vazia.");
+                if (Directory.GetFiles(extractedRoot, "*", SearchOption.AllDirectories).Length == 0)
+                {
+                    string warning = pboName + ": a extração não produziu arquivos utilizáveis. O PBO pode estar protegido/ofuscado.";
+                    _steamImportWarnings.Add(warning);
+                    Log(warning, Color.Gold);
+                    return;
+                }
+
+                if (HasEmptyRootConfigPlaceholder(extractedRoot))
+                {
+                    try
+                    {
+                        Log(pboName + ": config.cpp vazio detectado; recuperando scripts/config pelo addon Python v4.", _accent);
+                        PboSourceRecoveryResult recovery = await RecoverProtectedPbo(pbo, tempRoot);
+                        PboExtractionAuditResult audit = PboExtractionAuditor.Validate(recovery.ManifestPath, extractedRoot);
+                        Log(pboName + ": " + audit.Summary + ".", _success);
+                        _steamImportVerifications.Add(pboName + ": " + audit.VerifiedFiles + "/" +
+                            audit.PayloadFiles + " arquivos conferidos por SHA-1");
+                        _steamImportVerifications.Add(pboName + ": v5 " + recovery.VerificationStatus +
+                            " — scripts " + recovery.RecoveredScripts + ", P3D " + recovery.VerifiedP3ds + "/" +
+                            recovery.P3dCount + ", configs " + recovery.VerifiedConfigs + "/" + recovery.ConfigCount);
+                        MergeRecoveredPboSource(recovery.SourceRoot, extractedRoot);
+                        if (!string.IsNullOrWhiteSpace(recovery.Prefix)) prefix = recovery.Prefix;
+                        Log(pboName + ": recuperação complementar aplicada — " + recovery.Summary, _success);
+                        foreach (string item in recovery.Warnings)
+                        {
+                            string warning = pboName + ": " + item;
+                            _steamImportWarnings.Add(warning);
+                            Log(warning, Color.Gold);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        string warning = pboName + ": recuperação complementar pelo Python falhou; continuando com a extração normal. " + ex.Message;
+                        _steamImportWarnings.Add(warning);
+                        Log(warning, Color.Gold);
+                    }
+                }
+
+                SourcePreparationResult preparation = await SourcePreparer.PrepareAsync(extractedRoot,
+                    _settings.CfgConvertPath, LogLine);
+                Log("Source preparada: " + pboName + " — " + preparation.Summary,
+                    preparation.IsComplete && preparation.Warnings.Count == 0 ? _success : Color.Gold);
+                foreach (string item in preparation.Warnings)
+                {
+                    string warning = pboName + ": " + item;
+                    _steamImportWarnings.Add(warning);
+                    Log(warning, Color.Gold);
+                }
+
+                string preparedRoot = extractedRoot;
+                if (preparation.OdolPreserved > 0)
+                {
+                    if (!File.Exists(_settings.PythonPath))
+                    {
+                        string warning = pboName + ": Python não configurado; modelos ODOL foram preservados.";
+                        _steamImportWarnings.Add(warning);
+                        Log(warning, Color.Gold);
+                    }
+                    else
+                    {
+                        try
+                        {
+                            string converterPath = await EnsureOdolConverterAvailable();
+                            OdolReconstructionResult reconstruction = await OdolSourceReconstructor.ReconstructAsync(
+                                extractedRoot, _settings.PythonPath, converterPath, LogLine);
+                            if (reconstruction.Changed) preparedRoot = reconstruction.OutputRoot;
+                            Log("Reconstrução de modelos: " + pboName + " — " + reconstruction.Summary, _success);
+                            foreach (string item in reconstruction.Warnings)
+                            {
+                                string warning = pboName + ": " + item;
+                                _steamImportWarnings.Add(warning);
+                                Log(warning, Color.Gold);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            string warning = pboName + ": ODOL não reconstruído; originais preservados. " + ex.Message;
+                            _steamImportWarnings.Add(warning);
+                            Log(warning, Color.Gold);
+                        }
+                    }
+                }
+
                 string sourceRoot = Path.Combine(projectRoot, "source");
                 string destination = Path.Combine(sourceRoot, pboName);
-                if (Directory.Exists(destination) && Directory.EnumerateFileSystemEntries(destination).Any())
-                {
-                    string sourceBackup = Path.Combine(projectRoot, "source_backups", pboName + "_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"));
-                    Directory.CreateDirectory(Path.GetDirectoryName(sourceBackup));
-                    Directory.Move(destination, sourceBackup);
-                    Log("Source anterior preservado em: " + sourceBackup, Color.Gold);
-                }
-                Directory.CreateDirectory(destination);
-                CopyDirectoryContents(extractedRoot, destination);
+                ReplaceDirectoryByCopy(preparedRoot, destination);
+                if (!preparedRoot.Equals(extractedRoot, StringComparison.OrdinalIgnoreCase)) TryDeleteDirectory(preparedRoot);
                 SaveProjectPrefix(projectRoot, pboName, prefix);
-                Log("Extraído: " + pboName + " → " + destination + " (prefix=" + prefix + ")", _success);
+                Log((preparation.IsComplete ? "Extraído: " : "Extraído com pendências: ") + pboName +
+                    " → " + destination + " (prefix=" + prefix + ")",
+                    preparation.IsComplete ? _success : Color.Gold);
             }
             finally
             {
@@ -685,17 +893,112 @@ namespace DayZModWorkbench
             }
         }
 
-        private static string FindExtractedRoot(string tempRoot, string prefix)
+        private static bool IsProtectedPbo(string properties)
         {
-            string first = FirstPrefixFolder(prefix);
-            if (!string.IsNullOrWhiteSpace(first))
+            if (string.IsNullOrWhiteSpace(properties)) return false;
+            return properties.IndexOf("= obfuscated", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                properties.IndexOf("MPG Packer", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private async Task<PboSourceRecoveryResult> RecoverProtectedPbo(string pboPath, string tempRoot)
+        {
+            if (!File.Exists(_settings.PythonPath))
+                throw new FileNotFoundException("Python não configurado; confira a aba Configurações.", _settings.PythonPath);
+            if (!File.Exists(_settings.CfgConvertPath))
+                throw new FileNotFoundException("CfgConvert.exe não configurado; confira a aba Configurações.", _settings.CfgConvertPath);
+            string converterPath = await EnsureOdolConverterAvailable();
+            string recoveryRoot = Path.Combine(tempRoot, "PboRecovery");
+            PboSourceRecoveryResult recovery = await PboSourceReconstructor.RecoverAsync(pboPath, recoveryRoot,
+                _settings.PythonPath, converterPath, _settings.CfgConvertPath, LogLine);
+            RemoveVerifiedConfigBins(recovery.SourceRoot);
+            SourcePreparationResult preparation = await SourcePreparer.PrepareAsync(recovery.SourceRoot,
+                _settings.CfgConvertPath, LogLine);
+            recovery.Warnings.AddRange(preparation.Warnings);
+            return recovery;
+        }
+
+        private static bool HasEmptyRootConfigPlaceholder(string sourceRoot)
+        {
+            string configBin = Path.Combine(sourceRoot, "config.bin");
+            string configCpp = Path.Combine(sourceRoot, "config.cpp");
+            return File.Exists(configBin) && new FileInfo(configBin).Length > 0 &&
+                File.Exists(configCpp) && new FileInfo(configCpp).Length == 0;
+        }
+
+        internal static void MergeRecoveredPboSource(string recoveredRoot, string extractedRoot)
+        {
+            string recoveredScripts = Path.Combine(recoveredRoot, "scripts");
+            if (Directory.Exists(recoveredScripts))
             {
-                string expected = Path.Combine(tempRoot, first);
-                if (Directory.Exists(expected)) return expected;
+                string extractedScripts = Directory.GetDirectories(extractedRoot, "scripts", SearchOption.TopDirectoryOnly)
+                    .FirstOrDefault() ?? Path.Combine(extractedRoot, "scripts");
+                TryDeleteDirectory(extractedScripts);
+                Directory.CreateDirectory(extractedScripts);
+                CopyDirectoryContents(recoveredScripts, extractedScripts);
             }
-            string directory = Directory.GetDirectories(tempRoot).FirstOrDefault();
-            if (directory != null) return directory;
-            return Directory.GetFiles(tempRoot).Length > 0 ? tempRoot : null;
+
+            foreach (string recoveredCpp in Directory.GetFiles(recoveredRoot, "config.cpp", SearchOption.AllDirectories))
+            {
+                string relative = RelativePath(recoveredRoot, recoveredCpp);
+                string extractedCpp = Path.Combine(extractedRoot, relative);
+                string extractedBin = Path.ChangeExtension(extractedCpp, ".bin");
+                Directory.CreateDirectory(Path.GetDirectoryName(extractedCpp));
+                File.Copy(recoveredCpp, extractedCpp, true);
+                if (File.Exists(extractedBin)) File.Delete(extractedBin);
+            }
+
+            string recoveredRootCpp = Path.Combine(recoveredRoot, "config.cpp");
+            string recoveredRootBin = Path.Combine(recoveredRoot, "config.bin");
+            if (!File.Exists(recoveredRootCpp) && File.Exists(recoveredRootBin))
+            {
+                string extractedCpp = Path.Combine(extractedRoot, "config.cpp");
+                string extractedBin = Path.Combine(extractedRoot, "config.bin");
+                File.Copy(recoveredRootBin, extractedBin, true);
+                if (File.Exists(extractedCpp) && new FileInfo(extractedCpp).Length == 0) File.Delete(extractedCpp);
+            }
+        }
+
+        private static void RemoveVerifiedConfigBins(string sourceRoot)
+        {
+            foreach (string configBin in Directory.GetFiles(sourceRoot, "config.bin", SearchOption.AllDirectories))
+            {
+                string configCpp = Path.Combine(Path.GetDirectoryName(configBin), "config.cpp");
+                if (File.Exists(configCpp) && new FileInfo(configCpp).Length > 0) File.Delete(configBin);
+            }
+        }
+
+        private static string FindExtractedRoot(string tempRoot, string prefix, string pboName)
+        {
+            List<string> candidates = new List<string>();
+            string fullTemp = Path.GetFullPath(tempRoot).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            Action<string> addCandidate = delegate(string relative)
+            {
+                if (string.IsNullOrWhiteSpace(relative)) return;
+                try
+                {
+                    string candidate = Path.GetFullPath(Path.Combine(tempRoot, relative.Trim('\\', '/')));
+                    if (candidate.StartsWith(fullTemp, StringComparison.OrdinalIgnoreCase) &&
+                        !candidates.Contains(candidate, StringComparer.OrdinalIgnoreCase)) candidates.Add(candidate);
+                }
+                catch { }
+            };
+
+            addCandidate(prefix);
+            addCandidate(pboName);
+            string[] prefixParts = (prefix ?? string.Empty).Split(new[] { '\\', '/' }, StringSplitOptions.RemoveEmptyEntries);
+            if (prefixParts.Length > 0)
+            {
+                addCandidate(prefixParts[prefixParts.Length - 1]);
+                addCandidate(prefixParts[0]);
+            }
+
+            foreach (string candidate in candidates)
+                if (Directory.Exists(candidate) && Directory.GetFiles(candidate, "*", SearchOption.AllDirectories).Length > 0)
+                    return candidate;
+
+            if (Directory.GetFiles(tempRoot).Length > 0) return tempRoot;
+            return Directory.GetDirectories(tempRoot)
+                .FirstOrDefault(directory => Directory.GetFiles(directory, "*", SearchOption.AllDirectories).Length > 0);
         }
 
         private static void CopyDirectoryContents(string source, string destination)
@@ -708,6 +1011,64 @@ namespace DayZModWorkbench
                 Directory.CreateDirectory(Path.GetDirectoryName(target));
                 File.Copy(file, target, true);
             }
+        }
+
+        private static void ReplaceDirectoryByCopy(string replacementSource, string destination)
+        {
+            if (!Directory.Exists(replacementSource))
+                throw new DirectoryNotFoundException("Source preparado não encontrado: " + replacementSource);
+            if (File.Exists(destination))
+                throw new IOException("Existe um arquivo no caminho reservado para a source: " + destination);
+
+            string displaced = null;
+            if (Directory.Exists(destination))
+            {
+                displaced = destination + ".dayzworkbench-replace-" + Guid.NewGuid().ToString("N");
+                Directory.Move(destination, displaced);
+            }
+
+            try
+            {
+                Directory.CreateDirectory(destination);
+                CopyDirectoryContents(replacementSource, destination);
+            }
+            catch
+            {
+                TryDeleteDirectory(destination);
+                if (displaced != null && Directory.Exists(displaced) && !Directory.Exists(destination))
+                    Directory.Move(displaced, destination);
+                throw;
+            }
+
+            if (displaced != null) TryDeleteDirectory(displaced);
+        }
+
+        private static void ReplaceDirectoryByMove(string replacementSource, string destination)
+        {
+            if (!Directory.Exists(replacementSource))
+                throw new DirectoryNotFoundException("Source reconstruído não encontrado: " + replacementSource);
+            if (File.Exists(destination))
+                throw new IOException("Existe um arquivo no caminho reservado para a source: " + destination);
+
+            string displaced = null;
+            if (Directory.Exists(destination))
+            {
+                displaced = destination + ".dayzworkbench-replace-" + Guid.NewGuid().ToString("N");
+                Directory.Move(destination, displaced);
+            }
+
+            try
+            {
+                Directory.Move(replacementSource, destination);
+            }
+            catch
+            {
+                if (displaced != null && Directory.Exists(displaced) && !Directory.Exists(destination))
+                    Directory.Move(displaced, destination);
+                throw;
+            }
+
+            if (displaced != null) TryDeleteDirectory(displaced);
         }
 
         private static string MakeProjectFolderName(string value)
@@ -756,6 +1117,11 @@ namespace DayZModWorkbench
         {
             _benchText.Text = _settings.BenchPath;
             _bankRevText.Text = _settings.BankRevPath;
+            _cfgConvertText.Text = _settings.CfgConvertPath;
+            _pythonText.Text = _settings.PythonPath;
+            _odolConverterText.Text = _settings.OdolConverterPath;
+            _addonBuilderText.Text = _settings.AddonBuilderPath;
+            _projectDriveText.Text = _settings.ProjectDrivePath;
             _fileBankText.Text = _settings.FileBankPath;
             _signerText.Text = _settings.SignerPath;
             _privateKeyText.Text = _settings.PrivateKeyPath;
@@ -765,7 +1131,6 @@ namespace DayZModWorkbench
             _workshopText.Text = _settings.WorkshopPath;
             _editorDependenciesText.Text = _settings.EditorDependencies;
             _serverKeysText.Text = _settings.ServerKeysPath;
-            _backupText.Text = _settings.BackupPath;
             _launchArgsText.Text = _settings.ExtraLaunchArgs;
         }
 
@@ -773,17 +1138,89 @@ namespace DayZModWorkbench
         {
             _settings.BenchPath = _benchText.Text.Trim();
             _settings.BankRevPath = _bankRevText.Text.Trim();
+            _settings.CfgConvertPath = _cfgConvertText.Text.Trim();
+            _settings.PythonPath = _pythonText.Text.Trim();
+            _settings.OdolConverterPath = OdolConverterProvisioner.ManagedAddonPath;
+            _settings.AddonBuilderPath = _addonBuilderText.Text.Trim();
+            _settings.ProjectDrivePath = _projectDriveText.Text.Trim();
             _settings.FileBankPath = _fileBankText.Text.Trim();
             _settings.SignerPath = _signerText.Text.Trim();
-            _settings.PrivateKeyPath = _privateKeyText.Text.Trim();
+            _settings.PrivateKeyPath = PrivateKeyStore.IsStoredPrivateKey(_privateKeyText.Text.Trim())
+                ? Path.GetFullPath(_privateKeyText.Text.Trim())
+                : string.Empty;
             _settings.DayZPath = _dayZText.Text.Trim();
             _settings.DayZDiagPath = _dayZDiagText.Text.Trim();
             _settings.EditorPath = _editorText.Text.Trim();
             _settings.WorkshopPath = _workshopText.Text.Trim();
             _settings.EditorDependencies = _editorDependenciesText.Text.Trim();
             _settings.ServerKeysPath = _serverKeysText.Text.Trim();
-            _settings.BackupPath = _backupText.Text.Trim();
             _settings.ExtraLaunchArgs = _launchArgsText.Text.Trim();
+        }
+
+        private void AutoDetectSettings()
+        {
+            try
+            {
+                DetectedPaths detected = SteamPathDetector.Detect();
+                List<string> found = new List<string>();
+                List<string> missing = new List<string>();
+
+                ApplyDetectedPath(_bankRevText, detected.BankRevPath, "BankRev", found, missing);
+                ApplyDetectedPath(_cfgConvertText, detected.CfgConvertPath, "CfgConvert", found, missing);
+                ApplyDetectedPath(_pythonText, detected.PythonPath, "Python", found, missing);
+                _odolConverterText.Text = OdolConverterProvisioner.ManagedAddonPath;
+                found.Add(File.Exists(OdolConverterProvisioner.ManagedAddonPath)
+                    ? "addon ODOL"
+                    : "addon ODOL (será baixado no primeiro uso)");
+                ApplyDetectedPath(_addonBuilderText, detected.AddonBuilderPath, "Addon Builder", found, missing);
+                ApplyDetectedPath(_fileBankText, detected.FileBankPath, "FileBank", found, missing);
+                ApplyDetectedPath(_signerText, detected.SignerPath, "DSSignFile", found, missing);
+                ApplyDetectedPath(_dayZText, detected.DayZPath, "DayZ", found, missing);
+                ApplyDetectedPath(_dayZDiagText, detected.DayZDiagPath, "DayZDiag", found, missing);
+                ApplyDetectedPath(_workshopText, detected.WorkshopPath, "!Workshop", found, missing);
+                ApplyDetectedPath(_editorText, detected.EditorPath, "DayZ Editor", found, missing);
+                ApplyDetectedPath(_editorDependenciesText, detected.EditorDependencies, "dependências do Editor", found, missing);
+
+                string message = found.Count == 0
+                    ? "Nenhum caminho foi encontrado. Confirme se o Steam, o DayZ e o DayZ Tools estão instalados."
+                    : "Preenchido automaticamente:\n\n• " + string.Join("\n• ", found.ToArray());
+                if (missing.Count > 0)
+                    message += "\n\nNão encontrado:\n\n• " + string.Join("\n• ", missing.ToArray());
+                message += "\n\nBancada de mods e chaves públicas não foram alteradas. A chave privada é gerenciada na pasta keys do Workbench. Clique em Salvar configurações para confirmar.";
+
+                MessageBox.Show(this, message, "Auto detectar", MessageBoxButtons.OK,
+                    found.Count > 0 ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+                Log("Auto detecção: " + found.Count + " caminho(s) preenchido(s), " + missing.Count + " não encontrado(s).", _accent);
+                RefreshWorkDriveButton();
+            }
+            catch (Exception ex)
+            {
+                ShowError("Não foi possível detectar as instalações da Steam.", ex);
+            }
+        }
+
+        private async Task<string> EnsureOdolConverterAvailable()
+        {
+            string resolved = await OdolConverterProvisioner.EnsureAvailableAsync(_settings.OdolConverterPath, LogLine);
+            if (!resolved.Equals(_settings.OdolConverterPath ?? string.Empty, StringComparison.OrdinalIgnoreCase))
+            {
+                _settings.OdolConverterPath = resolved;
+                if (_odolConverterText != null) _odolConverterText.Text = resolved;
+                try { _settings.Save(); }
+                catch (Exception ex) { DiagnosticLog("Conversor baixado, mas o caminho não pôde ser salvo: " + ex.Message); }
+            }
+            return resolved;
+        }
+
+        private static void ApplyDetectedPath(TextBox field, string path, string label, List<string> found, List<string> missing)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                missing.Add(label);
+                return;
+            }
+            field.Text = path;
+            found.Add(label);
         }
 
         private void SaveSettings()
@@ -795,6 +1232,7 @@ namespace DayZModWorkbench
                 _privateKeyText.Text = _settings.PrivateKeyPath;
                 RefreshProjects();
                 ValidateSettings(true);
+                RefreshWorkDriveButton();
                 Log("Configurações salvas em " + ToolSettings.SettingsFile, _success);
             }
             catch (Exception ex)
@@ -809,6 +1247,10 @@ namespace DayZModWorkbench
             List<string> missing = new List<string>();
             CheckDirectory(_settings.BenchPath, "Bancada", missing);
             CheckFile(_settings.BankRevPath, "BankRev", missing);
+            CheckFile(_settings.CfgConvertPath, "CfgConvert", missing);
+            CheckFile(_settings.PythonPath, "Python", missing);
+            CheckFile(_settings.AddonBuilderPath, "Addon Builder", missing);
+            CheckDirectory(_settings.ProjectDrivePath, "Work drive / projeto", missing);
             CheckFile(_settings.FileBankPath, "FileBank", missing);
             CheckFile(_settings.SignerPath, "DSSignFile", missing);
             CheckFile(_settings.DayZPath, "DayZ", missing);
@@ -849,7 +1291,6 @@ namespace DayZModWorkbench
             foreach (string directory in Directory.GetDirectories(_settings.BenchPath).OrderBy(x => Path.GetFileName(x), StringComparer.CurrentCultureIgnoreCase))
             {
                 string name = Path.GetFileName(directory);
-                if (name.Equals("source_backups", StringComparison.OrdinalIgnoreCase)) continue;
                 _projectCombo.Items.Add(new PathItem { Name = name, FullPath = directory });
             }
 
@@ -894,7 +1335,7 @@ namespace DayZModWorkbench
         private static bool IsDerivedOrSourcePath(string projectRoot, string path)
         {
             string relative = RelativePath(projectRoot, path).Replace('/', '\\').ToLowerInvariant();
-            return relative.StartsWith("source\\") || relative.StartsWith("_test\\") || relative.StartsWith("source_backups\\");
+            return relative.StartsWith("source\\") || relative.StartsWith("_test\\");
         }
 
         private async Task ReadSelectedPboProperties()
@@ -924,50 +1365,198 @@ namespace DayZModWorkbench
                 MessageBox.Show(this, "BankRev.exe não foi encontrado. Confira Configurações.", "Extração", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
-
             string sourceRoot = Path.Combine(project.FullPath, "source");
+            string name = Path.GetFileNameWithoutExtension(pbo.FullPath);
+            string destination = Path.Combine(sourceRoot, name);
+            if (Directory.Exists(destination) && Directory.EnumerateFileSystemEntries(destination).Any())
+            {
+                DialogResult answer = MessageBox.Show(this,
+                    "O source já existe. Deseja substituí-lo pela nova extração?",
+                    "Source existente", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                if (answer != DialogResult.Yes) return;
+            }
+
+            string tempRoot = Path.Combine(Path.GetTempPath(), "DayZModWorkbench", "ManualExtract_" + Guid.NewGuid().ToString("N"));
 
             try
             {
                 SetBusy(true, "Lendo propriedades de " + Path.GetFileName(pbo.FullPath));
                 ProcessResult properties = await ProcessRunner.RunAsync(_settings.BankRevPath, "-p " + ProcessRunner.Quote(pbo.FullPath), project.FullPath, LogLine);
                 string prefix = ParsePrefix(properties.Output);
-                string name = FirstPrefixFolder(prefix);
-                if (string.IsNullOrWhiteSpace(name)) name = Path.GetFileNameWithoutExtension(pbo.FullPath);
-                string destination = Path.Combine(sourceRoot, name);
-
-                SetStatus("Extraindo " + Path.GetFileName(pbo.FullPath));
-                if (Directory.Exists(destination) && Directory.EnumerateFileSystemEntries(destination).Any())
+                if (IsProtectedPbo(properties.Output))
                 {
-                    DialogResult answer = MessageBox.Show(this,
-                        "O source já existe. Deseja movê-lo para source_backups e extrair novamente?",
-                        "Source existente", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-                    if (answer != DialogResult.Yes) return;
-
-                    string backupRoot = Path.Combine(project.FullPath, "source_backups");
-                    Directory.CreateDirectory(backupRoot);
-                    string backup = Path.Combine(backupRoot, name + "_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"));
-                    Directory.Move(destination, backup);
-                    Log("Source anterior preservado em: " + backup, Color.Gold);
+                    SetStatus("Recuperando PBO ofuscado " + Path.GetFileName(pbo.FullPath));
+                    Directory.CreateDirectory(tempRoot);
+                    Log(name + ": ofuscação detectada; iniciando recuperação pelo addon Python.", _accent);
+                    PboSourceRecoveryResult recovery = await RecoverProtectedPbo(pbo.FullPath, tempRoot);
+                    if (!string.IsNullOrWhiteSpace(recovery.Prefix)) prefix = recovery.Prefix;
+                    if (string.IsNullOrWhiteSpace(prefix)) prefix = name;
+                    ReplaceDirectoryByCopy(recovery.SourceRoot, destination);
+                    SaveProjectPrefix(project.FullPath, name, prefix);
+                    _prefixText.Text = prefix;
+                    RefreshProjectContents();
+                    SelectSourceByName(name);
+                    Log("PBO ofuscado recuperado: " + destination + " — " + recovery.Summary, _success);
+                    foreach (string warning in recovery.Warnings) Log(warning, Color.Gold);
+                    string recoveryWarnings = recovery.Warnings.Count == 0
+                        ? string.Empty
+                        : "\n\nAvisos:\n• " + string.Join("\n• ", recovery.Warnings.ToArray());
+                    MessageBox.Show(this, recovery.Summary + recoveryWarnings,
+                        "Source ofuscada recuperada", MessageBoxButtons.OK,
+                        recovery.Warnings.Count == 0 ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+                    SetStatus("PBO ofuscado recuperado para source");
+                    return;
                 }
-
                 if (string.IsNullOrWhiteSpace(prefix)) prefix = name;
-                Directory.CreateDirectory(sourceRoot);
-                string arguments = "-f " + ProcessRunner.Quote(sourceRoot) + " -t " + ProcessRunner.Quote(pbo.FullPath);
+                if (!File.Exists(_settings.CfgConvertPath))
+                    throw new FileNotFoundException("CfgConvert.exe não foi encontrado. Confira Configurações.", _settings.CfgConvertPath);
+
+                SetStatus("Extraindo e desbinarizando " + Path.GetFileName(pbo.FullPath));
+                Directory.CreateDirectory(tempRoot);
+                string arguments = "-f " + ProcessRunner.Quote(tempRoot) + " -t " + ProcessRunner.Quote(pbo.FullPath);
                 ProcessResult extract = await ProcessRunner.RunAsync(_settings.BankRevPath, arguments, project.FullPath, LogLine);
                 if (extract.ExitCode != 0) throw new InvalidOperationException("BankRev terminou com código " + extract.ExitCode);
-                if (!Directory.EnumerateFileSystemEntries(destination).Any()) throw new InvalidOperationException("A pasta source ficou vazia.");
+                string extractedRoot = FindExtractedRoot(tempRoot, prefix, name);
+                if (extractedRoot == null || Directory.GetFiles(extractedRoot, "*", SearchOption.AllDirectories).Length == 0)
+                    throw new InvalidOperationException("A extração não produziu arquivos utilizáveis. O PBO pode estar protegido/ofuscado.");
+
+                List<string> supplementalWarnings = new List<string>();
+                if (HasEmptyRootConfigPlaceholder(extractedRoot))
+                {
+                    try
+                    {
+                        Log(name + ": config.cpp vazio detectado; recuperando scripts/config pelo addon Python v4.", _accent);
+                        PboSourceRecoveryResult recovery = await RecoverProtectedPbo(pbo.FullPath, tempRoot);
+                        PboExtractionAuditResult audit = PboExtractionAuditor.Validate(recovery.ManifestPath, extractedRoot);
+                        Log(name + ": " + audit.Summary + ".", _success);
+                        MergeRecoveredPboSource(recovery.SourceRoot, extractedRoot);
+                        if (!string.IsNullOrWhiteSpace(recovery.Prefix)) prefix = recovery.Prefix;
+                        supplementalWarnings.AddRange(recovery.Warnings);
+                        Log(name + ": recuperação complementar aplicada — " + recovery.Summary, _success);
+                    }
+                    catch (Exception ex)
+                    {
+                        supplementalWarnings.Add("Recuperação complementar pelo Python falhou; a extração normal foi mantida. " + ex.Message);
+                    }
+                }
+
+                SourcePreparationResult preparation = await SourcePreparer.PrepareAsync(extractedRoot,
+                    _settings.CfgConvertPath, LogLine);
+
+                string preparedRoot = extractedRoot;
+                OdolReconstructionResult reconstruction = null;
+                List<string> preparationWarnings = new List<string>(supplementalWarnings);
+                preparationWarnings.AddRange(preparation.Warnings);
+                if (preparation.OdolPreserved > 0)
+                {
+                    if (!File.Exists(_settings.PythonPath))
+                        preparationWarnings.Add("Python não configurado; modelos ODOL foram preservados.");
+                    else
+                    {
+                        try
+                        {
+                            string converterPath = await EnsureOdolConverterAvailable();
+                            reconstruction = await OdolSourceReconstructor.ReconstructAsync(extractedRoot,
+                                _settings.PythonPath, converterPath, LogLine);
+                            if (reconstruction.Changed) preparedRoot = reconstruction.OutputRoot;
+                            preparationWarnings.AddRange(reconstruction.Warnings);
+                        }
+                        catch (Exception ex)
+                        {
+                            preparationWarnings.Add("ODOL não reconstruído; originais preservados. " + ex.Message);
+                        }
+                    }
+                }
+
+                ReplaceDirectoryByCopy(preparedRoot, destination);
+                if (!preparedRoot.Equals(extractedRoot, StringComparison.OrdinalIgnoreCase)) TryDeleteDirectory(preparedRoot);
 
                 SaveProjectPrefix(project.FullPath, name, prefix);
                 _prefixText.Text = prefix;
                 RefreshProjectContents();
                 SelectSourceByName(name);
-                Log("Extração concluída: " + destination, _success);
-                SetStatus("PBO extraído com sucesso");
+                string reconstructionSummary = reconstruction == null ? string.Empty : "\n" + reconstruction.Summary;
+                bool sourceComplete = preparation.IsComplete && preparationWarnings.Count == 0;
+                Log((sourceComplete ? "Extração concluída e source preparada: " :
+                    "Extração concluída com pendências: ") + destination + " — " + preparation.Summary + " " +
+                    reconstructionSummary, sourceComplete ? _success : Color.Gold);
+                foreach (string warning in preparationWarnings) Log(warning, Color.Gold);
+                string warningText = preparationWarnings.Count == 0
+                    ? string.Empty
+                    : "\n\nAvisos:\n• " + string.Join("\n• ", preparationWarnings.ToArray());
+                MessageBox.Show(this, preparation.Summary + reconstructionSummary + warningText,
+                    sourceComplete ? "Source extraída e preparada" : "Source extraída com pendências",
+                    MessageBoxButtons.OK,
+                    preparationWarnings.Count == 0 ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+                SetStatus(sourceComplete ? "PBO extraído e source desbinarizada" :
+                    "PBO extraído; source possui arquivos binários preservados");
             }
             catch (Exception ex)
             {
                 ShowError("Falha ao extrair o PBO.", ex);
+            }
+            finally
+            {
+                TryDeleteDirectory(tempRoot);
+                SetBusy(false, "Pronto");
+            }
+        }
+
+        private async Task PrepareSelectedSource()
+        {
+            PathItem project = SelectedProject;
+            PathItem source = SelectedSource;
+            if (project == null || source == null)
+            {
+                MessageBox.Show(this, "Selecione um projeto e um source.", "Desbinarização", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            if (!File.Exists(_settings.CfgConvertPath))
+            {
+                MessageBox.Show(this, "CfgConvert.exe não foi encontrado. Confira Configurações.", "Desbinarização", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            if (!File.Exists(_settings.PythonPath))
+            {
+                MessageBox.Show(this, "Python não foi encontrado. Confira Configurações.", "Desbinarização", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            DialogResult answer = MessageBox.Show(this,
+                "Converter config.bin e materiais RaP para texto e reconstruir modelos ODOL53/54/55 como MLOD?\n\nA source atual será substituída após a reconstrução ser validada.",
+                "Preparar source editável", MessageBoxButtons.OKCancel, MessageBoxIcon.Information);
+            if (answer != DialogResult.OK) return;
+
+            try
+            {
+                SetBusy(true, "Desbinarizando " + source.Name);
+                SourcePreparationResult preparation = await SourcePreparer.PrepareAsync(source.FullPath,
+                    _settings.CfgConvertPath, LogLine);
+
+                string converterPath = preparation.OdolPreserved > 0
+                    ? await EnsureOdolConverterAvailable()
+                    : _settings.OdolConverterPath;
+                OdolReconstructionResult reconstruction = await OdolSourceReconstructor.ReconstructAsync(source.FullPath,
+                    _settings.PythonPath, converterPath, LogLine);
+                if (reconstruction.Changed)
+                    ReplaceDirectoryByMove(reconstruction.OutputRoot, source.FullPath);
+
+                Log("Source preparada: " + source.FullPath + " — " + preparation.Summary + " " + reconstruction.Summary, _success);
+                foreach (string warning in preparation.Warnings) Log(warning, Color.Gold);
+                foreach (string warning in reconstruction.Warnings) Log(warning, Color.Gold);
+                List<string> allWarnings = new List<string>(preparation.Warnings);
+                allWarnings.AddRange(reconstruction.Warnings);
+                string warningText = allWarnings.Count == 0
+                    ? string.Empty
+                    : "\n\nAvisos:\n• " + string.Join("\n• ", allWarnings.ToArray());
+                MessageBox.Show(this, preparation.Summary + "\n" + reconstruction.Summary + warningText,
+                    "Source preparada", MessageBoxButtons.OK,
+                    allWarnings.Count == 0 ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+                SetStatus("Source preparada para edição");
+            }
+            catch (Exception ex)
+            {
+                ShowError("Falha ao desbinarizar o source.", ex);
             }
             finally
             {
@@ -1020,32 +1609,58 @@ namespace DayZModWorkbench
             if (source != SelectedSource) prefix = LoadProjectPrefix(project.FullPath, source.Name);
             if (string.IsNullOrWhiteSpace(prefix)) prefix = source.Name;
             prefix = prefix.TrimEnd('\\', '/');
+            bool hasMlodModels = ContainsMlodModels(source.FullPath);
 
-            if (!File.Exists(_settings.FileBankPath))
+            if (hasMlodModels && (!File.Exists(_settings.AddonBuilderPath) || !Directory.Exists(_settings.ProjectDrivePath)))
+            {
+                MessageBox.Show(this, "A source contém modelos MLOD. Configure AddonBuilder.exe e o work drive para binarizá-los.",
+                    "Compilação", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+            if (!hasMlodModels && !File.Exists(_settings.FileBankPath))
             {
                 MessageBox.Show(this, "FileBank.exe não foi encontrado.", "Compilação", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
-            if (sign && !File.Exists(_privateKeyText.Text.Trim()))
+            string privateKeyPath = _privateKeyText.Text.Trim();
+            if (sign && !PrivateKeyStore.IsStoredPrivateKey(privateKeyPath))
             {
-                MessageBox.Show(this, "A chave privada selecionada não existe.", "Assinatura", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, "Adicione uma chave .biprivatekey à pasta keys do Workbench.", "Assinatura", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
 
             string tempRoot = Path.Combine(Path.GetTempPath(), "DayZModWorkbench", Guid.NewGuid().ToString("N"));
             string tempOut = Path.Combine(tempRoot, "out");
+            string stagedSource = null;
+            string projectDrive = null;
             Directory.CreateDirectory(tempOut);
             try
             {
                 if (manageBusy) SetBusy(true, "Compilando " + source.Name);
                 Log("Compilando source: " + source.FullPath, _accent);
-                string arguments = "-property " + ProcessRunner.Quote("prefix=" + prefix) + " -dst " + ProcessRunner.Quote(tempOut) + " " + ProcessRunner.Quote(source.FullPath);
-                ProcessResult result = await ProcessRunner.RunAsync(_settings.FileBankPath, arguments, project.FullPath, LogLine);
-                if (result.ExitCode != 0) throw new InvalidOperationException("FileBank terminou com código " + result.ExitCode);
+                ProcessResult result;
+                if (hasMlodModels)
+                {
+                    projectDrive = Path.GetFullPath(_settings.ProjectDrivePath);
+                    stagedSource = StageSourceForAddonBuilder(source.FullPath, projectDrive, prefix);
+                    string arguments = ProcessRunner.Quote(stagedSource) + " " + ProcessRunner.Quote(tempOut) +
+                        " -clear -prefix=" + ProcessRunner.Quote(prefix) +
+                        " -project=" + ProcessRunner.Quote(projectDrive.TrimEnd('\\', '/')) +
+                        " -temp=" + ProcessRunner.Quote(Path.Combine(tempRoot, "binarized")) + " -binarizeFullLogs";
+                    result = await ProcessRunner.RunAsync(_settings.AddonBuilderPath, arguments, projectDrive, LogLine);
+                    if (result.ExitCode != 0 || result.Output.IndexOf("Build Successful", StringComparison.OrdinalIgnoreCase) < 0)
+                        throw new InvalidOperationException("Addon Builder não concluiu a binarização dos modelos MLOD.");
+                }
+                else
+                {
+                    string arguments = "-property " + ProcessRunner.Quote("prefix=" + prefix) + " -dst " + ProcessRunner.Quote(tempOut) + " " + ProcessRunner.Quote(source.FullPath);
+                    result = await ProcessRunner.RunAsync(_settings.FileBankPath, arguments, project.FullPath, LogLine);
+                    if (result.ExitCode != 0) throw new InvalidOperationException("FileBank terminou com código " + result.ExitCode);
+                }
 
                 string expected = Path.Combine(tempOut, source.Name + ".pbo");
                 string builtPbo = File.Exists(expected) ? expected : Directory.GetFiles(tempOut, "*.pbo").OrderByDescending(File.GetLastWriteTimeUtc).FirstOrDefault();
-                if (builtPbo == null) throw new InvalidOperationException("O FileBank não criou um PBO.");
+                if (builtPbo == null) throw new InvalidOperationException("A ferramenta de compilação não criou um PBO.");
                 FileInfo info = new FileInfo(builtPbo);
                 if (info.Length < 128) throw new InvalidOperationException("O PBO criado parece vazio (" + info.Length + " bytes).");
 
@@ -1056,7 +1671,7 @@ namespace DayZModWorkbench
                 if (sign)
                 {
                     ProcessResult signed = await ProcessRunner.RunAsync(_settings.SignerPath,
-                        ProcessRunner.Quote(_privateKeyText.Text.Trim()) + " " + ProcessRunner.Quote(builtPbo), tempOut, LogLine);
+                        ProcessRunner.Quote(privateKeyPath) + " " + ProcessRunner.Quote(builtPbo), tempOut, LogLine);
                     if (signed.ExitCode != 0) throw new InvalidOperationException("DSSignFile terminou com código " + signed.ExitCode);
                     signature = Directory.GetFiles(tempOut, Path.GetFileName(builtPbo) + ".*.bisign").FirstOrDefault();
                     if (signature == null) throw new InvalidOperationException("A assinatura BISIGN não foi criada.");
@@ -1064,8 +1679,9 @@ namespace DayZModWorkbench
 
                 string outputFolder = Path.Combine(project.FullPath, "PBO");
                 Directory.CreateDirectory(outputFolder);
-                BackupExistingBuild(project.Name, outputFolder, Path.GetFileName(builtPbo));
                 string destinationPbo = Path.Combine(outputFolder, Path.GetFileName(builtPbo));
+                foreach (string oldSignature in Directory.GetFiles(outputFolder, Path.GetFileName(builtPbo) + ".*.bisign"))
+                    File.Delete(oldSignature);
                 File.Copy(builtPbo, destinationPbo, true);
                 if (signature != null) File.Copy(signature, Path.Combine(outputFolder, Path.GetFileName(signature)), true);
 
@@ -1087,21 +1703,73 @@ namespace DayZModWorkbench
             finally
             {
                 if (manageBusy) SetBusy(false, "Pronto");
+                if (stagedSource != null && !stagedSource.Equals(source.FullPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    TryDeleteDirectory(stagedSource);
+                    TryDeleteEmptyParents(Path.GetDirectoryName(stagedSource), projectDrive);
+                }
                 TryDeleteDirectory(tempRoot);
             }
         }
 
-        private void BackupExistingBuild(string projectName, string outputFolder, string pboName)
+        private static bool ContainsMlodModels(string sourceRoot)
         {
-            string existing = Path.Combine(outputFolder, pboName);
-            string[] signatures = Directory.Exists(outputFolder) ? Directory.GetFiles(outputFolder, pboName + ".*.bisign") : new string[0];
-            if (!File.Exists(existing) && signatures.Length == 0) return;
+            foreach (string model in Directory.GetFiles(sourceRoot, "*.p3d", SearchOption.AllDirectories))
+            {
+                try
+                {
+                    byte[] signature = new byte[4];
+                    using (FileStream stream = new FileStream(model, FileMode.Open, FileAccess.Read, FileShare.Read))
+                        if (stream.Read(signature, 0, signature.Length) == signature.Length && Encoding.ASCII.GetString(signature) == "MLOD") return true;
+                }
+                catch { }
+            }
+            return false;
+        }
 
-            string backup = Path.Combine(_settings.BackupPath, SafeName(projectName), DateTime.Now.ToString("yyyyMMdd_HHmmss"));
-            Directory.CreateDirectory(backup);
-            if (File.Exists(existing)) File.Copy(existing, Path.Combine(backup, Path.GetFileName(existing)), true);
-            foreach (string signature in signatures) File.Copy(signature, Path.Combine(backup, Path.GetFileName(signature)), true);
-            Log("Build anterior preservado em: " + backup, Color.Gold);
+        private static string StageSourceForAddonBuilder(string sourceRoot, string projectDrive, string prefix)
+        {
+            string fullProject = Path.GetFullPath(projectDrive).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            string relativePrefix = prefix.Replace('/', Path.DirectorySeparatorChar).Trim(Path.DirectorySeparatorChar);
+            string staged = Path.GetFullPath(Path.Combine(fullProject, relativePrefix));
+            if (!staged.StartsWith(fullProject, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Prefixo do PBO aponta para fora do work drive: " + prefix);
+            if (Path.GetFullPath(sourceRoot).TrimEnd('\\', '/').Equals(staged.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase))
+                return sourceRoot;
+            if (Directory.Exists(staged) || File.Exists(staged))
+                throw new InvalidOperationException("O caminho temporário do prefixo já existe no work drive: " + staged);
+
+            try
+            {
+                Directory.CreateDirectory(staged);
+                CopyDirectoryContents(sourceRoot, staged);
+                return staged;
+            }
+            catch
+            {
+                TryDeleteDirectory(staged);
+                TryDeleteEmptyParents(Path.GetDirectoryName(staged), fullProject);
+                throw;
+            }
+        }
+
+        private static void TryDeleteEmptyParents(string directory, string stopAt)
+        {
+            if (string.IsNullOrWhiteSpace(directory) || string.IsNullOrWhiteSpace(stopAt)) return;
+            string stop = Path.GetFullPath(stopAt).TrimEnd('\\', '/');
+            string current = Path.GetFullPath(directory).TrimEnd('\\', '/');
+            try
+            {
+                while (!current.Equals(stop, StringComparison.OrdinalIgnoreCase) && Directory.Exists(current) &&
+                    !Directory.EnumerateFileSystemEntries(current).Any())
+                {
+                    Directory.Delete(current);
+                    DirectoryInfo parent = Directory.GetParent(current);
+                    if (parent == null) break;
+                    current = parent.FullName.TrimEnd('\\', '/');
+                }
+            }
+            catch { }
         }
 
         private async Task VerifyProjectSignatures()
@@ -1131,6 +1799,99 @@ namespace DayZModWorkbench
             finally
             {
                 SetBusy(false, "Pronto");
+            }
+        }
+
+        private void RefreshWorkDriveButton()
+        {
+            if (_workDriveButton == null) return;
+            try
+            {
+                string configuredDrive = _projectDriveText != null && !string.IsNullOrWhiteSpace(_projectDriveText.Text)
+                    ? _projectDriveText.Text.Trim()
+                    : _settings.ProjectDrivePath;
+                WorkDriveState state = WorkDriveManager.GetState(configuredDrive);
+                string executable = WorkDriveManager.FindExecutable(_settings.AddonBuilderPath,
+                    _settings.BankRevPath, _settings.CfgConvertPath);
+                bool managed = WorkDriveManager.IsManagedMapping(executable, state);
+                if (!state.IsAvailable)
+                {
+                    _workDriveButton.Text = "Montar " + state.DriveName;
+                    _workDriveButton.BackColor = Color.FromArgb(155, 90, 230);
+                    _workDriveButton.Enabled = !_busy;
+                    _workDriveButton.Tag = "WorkDrive desmontado";
+                }
+                else if (managed)
+                {
+                    _workDriveButton.Text = "Desmontar " + state.DriveName;
+                    _workDriveButton.BackColor = _success;
+                    _workDriveButton.Enabled = !_busy;
+                    _workDriveButton.Tag = state.DriveName + " → " + state.TargetPath;
+                }
+                else
+                {
+                    _workDriveButton.Text = state.DriveName + " em uso";
+                    _workDriveButton.BackColor = Color.DarkOrange;
+                    _workDriveButton.Enabled = false;
+                    _workDriveButton.Tag = "A letra está ocupada por outra unidade: " + state.TargetPath;
+                }
+            }
+            catch (Exception ex)
+            {
+                _workDriveButton.Text = "WorkDrive inválido";
+                _workDriveButton.BackColor = Color.DarkOrange;
+                _workDriveButton.Enabled = false;
+                _workDriveButton.Tag = ex.Message;
+            }
+        }
+
+        private async Task ToggleWorkDrive()
+        {
+            try
+            {
+                string configuredDrive = _projectDriveText != null && !string.IsNullOrWhiteSpace(_projectDriveText.Text)
+                    ? _projectDriveText.Text.Trim()
+                    : _settings.ProjectDrivePath;
+                WorkDriveState before = WorkDriveManager.GetState(configuredDrive);
+                string executable = WorkDriveManager.FindExecutable(_settings.AddonBuilderPath,
+                    _settings.BankRevPath, _settings.CfgConvertPath);
+                if (before.IsAvailable && !WorkDriveManager.IsManagedMapping(executable, before))
+                    throw new InvalidOperationException(before.DriveName + " está ocupado por outra unidade e não será desmontado.");
+
+                bool mount = !before.IsAvailable;
+                SetBusy(true, (mount ? "Montando " : "Desmontando ") + before.DriveName);
+                Log((mount ? "Montando" : "Desmontando") + " WorkDrive " + before.DriveName + " pelo DayZ Tools...", _accent);
+                await WorkDriveManager.SetMountedAsync(executable, mount, LogLine);
+
+                WorkDriveState after = null;
+                for (int attempt = 0; attempt < 20; attempt++)
+                {
+                    after = WorkDriveManager.GetState(configuredDrive);
+                    bool reached = mount
+                        ? after.IsAvailable && WorkDriveManager.IsManagedMapping(executable, after)
+                        : !after.IsAvailable;
+                    if (reached) break;
+                    await Task.Delay(100);
+                }
+                if (mount && (!after.IsAvailable || !WorkDriveManager.IsManagedMapping(executable, after)))
+                    throw new InvalidOperationException("O DayZ Tools terminou, mas " + before.DriveName + " não foi montado corretamente.");
+                if (!mount && after.IsAvailable)
+                    throw new InvalidOperationException("O DayZ Tools terminou, mas " + before.DriveName + " continua montado.");
+
+                string message = mount
+                    ? after.DriveName + " montado em " + after.TargetPath
+                    : before.DriveName + " desmontado";
+                Log(message, _success);
+                SetStatus(message);
+            }
+            catch (Exception ex)
+            {
+                ShowError("Não foi possível alterar o WorkDrive do DayZ Tools.", ex);
+            }
+            finally
+            {
+                SetBusy(false, "Pronto");
+                RefreshWorkDriveButton();
             }
         }
 
@@ -1600,6 +2361,33 @@ namespace DayZModWorkbench
                     dialog.FileName = Path.GetFileName(target.Text);
                 }
                 if (dialog.ShowDialog(this) == DialogResult.OK) target.Text = dialog.FileName;
+            }
+        }
+
+        private void ImportPrivateKey()
+        {
+            try
+            {
+                Directory.CreateDirectory(PrivateKeyStore.DirectoryPath);
+                using (OpenFileDialog dialog = new OpenFileDialog())
+                {
+                    dialog.Filter = "Chave privada DayZ|*.biprivatekey";
+                    dialog.InitialDirectory = PrivateKeyStore.DirectoryPath;
+                    if (File.Exists(_privateKeyText.Text))
+                        dialog.FileName = Path.GetFileName(_privateKeyText.Text);
+                    if (dialog.ShowDialog(this) != DialogResult.OK) return;
+
+                    string localPath = PrivateKeyStore.Import(dialog.FileName);
+                    _privateKeyText.Text = localPath;
+                    _settings.PrivateKeyPath = localPath;
+                    _settings.Save();
+                    Log("Chave privada adicionada à pasta local do Workbench: " + localPath, _success);
+                    SetStatus("Chave privada pronta para assinatura");
+                }
+            }
+            catch (Exception ex)
+            {
+                ShowError("Não foi possível adicionar a chave privada à pasta keys.", ex);
             }
         }
 

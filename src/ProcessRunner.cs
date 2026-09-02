@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.IO;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -15,8 +16,16 @@ namespace DayZModWorkbench
     {
         public static Task<ProcessResult> RunAsync(string executable, string arguments, string workingDirectory, Action<string> log)
         {
+            return RunAsync(executable, arguments, workingDirectory, log, -1);
+        }
+
+        public static Task<ProcessResult> RunAsync(string executable, string arguments, string workingDirectory,
+            Action<string> log, int timeoutMilliseconds)
+        {
             return Task.Run(delegate
             {
+                if (timeoutMilliseconds == 0 || timeoutMilliseconds < -1)
+                    throw new ArgumentOutOfRangeException("timeoutMilliseconds");
                 StringBuilder output = new StringBuilder();
                 using (Process process = new Process())
                 {
@@ -47,7 +56,23 @@ namespace DayZModWorkbench
                     process.Start();
                     process.BeginOutputReadLine();
                     process.BeginErrorReadLine();
-                    process.WaitForExit();
+                    bool completed;
+                    if (timeoutMilliseconds < 0)
+                    {
+                        process.WaitForExit();
+                        completed = true;
+                    }
+                    else
+                    {
+                        completed = process.WaitForExit(timeoutMilliseconds);
+                    }
+                    if (!completed)
+                    {
+                        try { process.Kill(); } catch { }
+                        try { process.WaitForExit(2000); } catch { }
+                        throw new TimeoutException(Path.GetFileName(executable) + " excedeu o limite de " +
+                            Math.Max(1, timeoutMilliseconds / 1000) + " segundo(s) e foi encerrado.");
+                    }
                     process.WaitForExit();
                     string text;
                     lock (output) text = output.ToString();
