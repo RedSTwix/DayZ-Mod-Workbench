@@ -24,3 +24,9 @@ settings.ini
 *.bak
 Thumbs.db
 Desktop.ini
+
+# Addons gerenciados/atualizados pelo próprio Workbench
+addons/
+
+# Chaves privadas locais; nunca versionar ou distribuir
+keys/

@@ -22,11 +22,21 @@
     <Reference Include="System.Core" />
     <Reference Include="System.Drawing" />
     <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Web.Extensions" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Program.cs" />
     <Compile Include="ToolSettings.cs" />
+    <Compile Include="SteamPathDetector.cs" />
     <Compile Include="ProcessRunner.cs" />
+    <Compile Include="RapTextConverter.cs" />
+    <Compile Include="SourcePreparer.cs" />
+    <Compile Include="OdolSourceReconstructor.cs" />
+    <Compile Include="OdolConverterProvisioner.cs" />
+    <Compile Include="PboSourceReconstructor.cs" />
+    <Compile Include="PboExtractionAuditor.cs" />
+    <Compile Include="PrivateKeyStore.cs" />
+    <Compile Include="WorkDriveManager.cs" />
     <Compile Include="ModSelectionForm.cs" />
     <Compile Include="MainForm.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
