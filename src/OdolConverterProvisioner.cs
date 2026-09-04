@@ -25,6 +25,14 @@ namespace DayZModWorkbench
         private const string ReleaseDownloadBaseUrl =
             "https://github.com/RedSTwix/DayZ-Mod-Workbench-Updates/releases/download/";
 
+        private const string SevenZipVersion = "26.02";
+
+        private const string SevenZipDownloadUrl =
+            "https://github.com/ip7z/7zip/releases/download/26.02/7zr.exe";
+
+        private const string SevenZipSha256 =
+            "56B8CC9F4971CEF253644FAFE54063ED7FDCA551D4DEE0F8C6BAA81B855ACD72";
+
         private static readonly object Sync = new object();
         private static Task<string> _ensureTask;
 
@@ -371,7 +379,8 @@ namespace DayZModWorkbench
                     log("SHA-256 do pacote confirmado.");
 
                 string password = ReadArchivePassword();
-                string sevenZipPath = FindSevenZipExecutable();
+                string sevenZipPath =
+                    await EnsureSevenZipAvailableAsync(log);
 
                 if (log != null)
                     log("Extraindo pacote criptografado do addon...");
@@ -439,9 +448,96 @@ namespace DayZModWorkbench
                 "senha.txt não foi encontrado. Coloque-o na pasta do DayZ Mod Workbench " +
                 "ou ao lado do executável.");
         }
+        private static async Task<string> EnsureSevenZipAvailableAsync(
+            Action<string> log)
+        {
+            string existing = FindSevenZipExecutable();
+
+            if (!string.IsNullOrWhiteSpace(existing))
+                return existing;
+
+            string baseDirectory = AppDomain.CurrentDomain.BaseDirectory;
+
+            string toolDirectory = Path.Combine(
+                baseDirectory, "tools", "7zip");
+
+            string targetPath = Path.Combine(
+                toolDirectory, "7z.exe");
+
+            string temporaryPath = targetPath +
+                ".download-" + Guid.NewGuid().ToString("N") + ".tmp";
+
+            try
+            {
+                Directory.CreateDirectory(toolDirectory);
+
+                if (log != null)
+                {
+                    log("7-Zip não encontrado no computador; baixando 7zr.exe " +
+                        SevenZipVersion + " do repositório oficial...");
+                }
+
+                using (WebClient client = CreateWebClient())
+                {
+                    await client.DownloadFileTaskAsync(
+                        new Uri(SevenZipDownloadUrl),
+                        temporaryPath);
+                }
+
+                string actualHash = ComputeSha256File(temporaryPath);
+
+                if (!actualHash.Equals(
+                    SevenZipSha256,
+                    StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        "Falha de integridade no 7-Zip portátil. SHA-256 esperado: " +
+                        SevenZipSha256 + "; recebido: " + actualHash + ".");
+                }
+
+                if (File.Exists(targetPath))
+                    File.Delete(targetPath);
+
+                File.Move(temporaryPath, targetPath);
+
+                if (!File.Exists(targetPath))
+                {
+                    throw new InvalidOperationException(
+                        "O 7-Zip portátil foi baixado, mas não pôde ser instalado.");
+                }
+
+                if (log != null)
+                {
+                    log("7-Zip portátil " + SevenZipVersion +
+                        " instalado em: " + targetPath);
+                }
+
+                return targetPath;
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException(
+                    "7-Zip não foi encontrado no computador e o Workbench " +
+                    "não conseguiu obter automaticamente a cópia portátil oficial.",
+                    ex);
+            }
+            finally
+            {
+                try
+                {
+                    if (File.Exists(temporaryPath))
+                        File.Delete(temporaryPath);
+                }
+                catch { }
+            }
+        }
+
         private static string FindSevenZipExecutable()
         {
             string baseDirectory = AppDomain.CurrentDomain.BaseDirectory;
+
+            string managedSevenZip = Path.Combine(
+                baseDirectory, "tools", "7zip", "7z.exe");
 
             string programW6432 =
                 Environment.GetEnvironmentVariable("ProgramW6432");
@@ -453,42 +549,53 @@ namespace DayZModWorkbench
 
             string[] candidates =
             {
-                programFiles64SevenZip,
+                managedSevenZip,
                 Path.Combine(baseDirectory, "7z.exe"),
-                Path.Combine(baseDirectory, "tools", "7zip", "7z.exe"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                programFiles64SevenZip,
+                Path.Combine(
+                    Environment.GetFolderPath(
+                        Environment.SpecialFolder.ProgramFiles),
                     "7-Zip", "7z.exe"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+                Path.Combine(
+                    Environment.GetFolderPath(
+                        Environment.SpecialFolder.ProgramFilesX86),
                     "7-Zip", "7z.exe")
             };
 
             foreach (string candidate in candidates)
             {
-                if (!string.IsNullOrWhiteSpace(candidate) && File.Exists(candidate))
+                if (!string.IsNullOrWhiteSpace(candidate) &&
+                    File.Exists(candidate))
+                {
                     return candidate;
+                }
             }
 
-            string path = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
-            string[] pathEntries = path.Split(new[] { ';' },
+            string path =
+                Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+
+            string[] pathEntries = path.Split(
+                new[] { ';' },
                 StringSplitOptions.RemoveEmptyEntries);
 
             foreach (string entry in pathEntries)
             {
                 try
                 {
-                    string candidate = Path.Combine(entry.Trim().Trim('"'), "7z.exe");
+                    string candidate = Path.Combine(
+                        entry.Trim().Trim('"'),
+                        "7z.exe");
+
                     if (File.Exists(candidate))
                         return candidate;
                 }
                 catch
                 {
-                    // Ignora uma entrada PATH inválida e continua procurando.
+                    // Ignora uma entrada PATH inválida.
                 }
             }
 
-            throw new FileNotFoundException(
-                "7z.exe não foi encontrado. Para este primeiro updater, instale o 7-Zip " +
-                "ou coloque 7z.exe em tools\\7zip dentro do Workbench.");
+            return null;
         }
 
         private static void ExtractSevenZip(
