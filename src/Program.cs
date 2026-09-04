@@ -6,6 +6,12 @@ namespace DayZModWorkbench
 {
     internal static class Program
     {
+        internal static string CreateTemporaryPath(string operation)
+        {
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "DayZ Mod Workbench", operation + "_" + Guid.NewGuid().ToString("N"));
+        }
+
         [STAThread]
         private static void Main(string[] args)
         {
@@ -31,14 +37,74 @@ namespace DayZModWorkbench
                 try
                 {
                     ToolSettings settings = ToolSettings.Load();
+                    string diagnosticDir = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                        "DayZ Mod Workbench");
+
+                    Directory.CreateDirectory(diagnosticDir);
+
+                    string diagnosticPath = Path.Combine(
+                        diagnosticDir, "odol-addon-test-error.txt");
+
+                    File.WriteAllText(diagnosticPath,
+                        "=== TESTE DO UPDATER ODOL ===" + Environment.NewLine);
+
+                    Action<string> testLog = delegate(string message)
+                    {
+                        File.AppendAllText(
+                            diagnosticPath,
+                            DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") +
+                            "  " + message + Environment.NewLine);
+                    };
+
                     string path = OdolConverterProvisioner.EnsureAvailableAsync(
-                        settings.OdolConverterPath, null).GetAwaiter().GetResult();
-                    Environment.ExitCode = File.Exists(path) &&
-                        Path.GetFullPath(path).Equals(Path.GetFullPath(OdolConverterProvisioner.ManagedAddonPath),
-                            StringComparison.OrdinalIgnoreCase) ? 0 : 1;
+                        settings.OdolConverterPath, testLog).GetAwaiter().GetResult();
+
+                    bool testSucceeded =
+                        File.Exists(path) &&
+                        Path.GetFullPath(path).Equals(
+                            Path.GetFullPath(OdolConverterProvisioner.ManagedAddonPath),
+                            StringComparison.OrdinalIgnoreCase);
+
+                    Environment.ExitCode = testSucceeded ? 0 : 1;
+
+                    if (testSucceeded)
+                    {
+                        try
+                        {
+                            if (File.Exists(diagnosticPath))
+                                File.Delete(diagnosticPath);
+                        }
+                        catch { }
+
+                        try
+                        {
+                            string updateRoot = Path.Combine(
+                                diagnosticDir, "updates");
+
+                            if (Directory.Exists(updateRoot) &&
+                                Directory.GetFileSystemEntries(updateRoot).Length == 0)
+                            {
+                                Directory.Delete(updateRoot, false);
+                            }
+                        }
+                        catch { }
+                    }
                 }
-                catch
+                catch (Exception ex)
                 {
+                    string diagnosticDir = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                        "DayZ Mod Workbench");
+
+                    Directory.CreateDirectory(diagnosticDir);
+
+                    File.AppendAllText(
+                        Path.Combine(diagnosticDir, "odol-addon-test-error.txt"),
+                        Environment.NewLine +
+                        "=== EXCEÇÃO ===" + Environment.NewLine +
+                        ex.ToString() + Environment.NewLine);
+
                     Environment.ExitCode = 1;
                 }
                 return;
@@ -48,8 +114,7 @@ namespace DayZModWorkbench
             if (pboRecoveryTest != null)
             {
                 string pboPath = pboRecoveryTest.Substring("--test-pbo-recovery=".Length).Trim('"');
-                string outputRoot = Path.Combine(Path.GetTempPath(), "DayZModWorkbench",
-                    "PboRecoveryTest_" + Guid.NewGuid().ToString("N"));
+                string outputRoot = CreateTemporaryPath("PboRecoveryTest");
                 try
                 {
                     ToolSettings settings = ToolSettings.Load();
@@ -126,6 +191,19 @@ namespace DayZModWorkbench
                 ModSelectionForm selector = ModSelectionForm.CreateFromPaths(settings.WorkshopPath, settings.BenchPath,
                     settings.EditorDependencies + ";" + settings.EditorPath, string.Empty);
                 Application.Run(selector);
+                return;
+            }
+            if (args != null && Array.IndexOf(args, "--test-steam-progress-ui") >= 0)
+            {
+                MainForm testForm = new MainForm();
+                bool succeeded = false;
+                testForm.Shown += delegate
+                {
+                    succeeded = testForm.RunSteamProgressLayoutTest();
+                    testForm.Close();
+                };
+                Application.Run(testForm);
+                Environment.ExitCode = succeeded ? 0 : 1;
                 return;
             }
             string prepareTest = args == null ? null : Array.Find(args, value => value.StartsWith("--test-prepare=", StringComparison.OrdinalIgnoreCase));
