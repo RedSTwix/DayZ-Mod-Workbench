@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
@@ -20,6 +21,8 @@ namespace DayZModWorkbench
         public int UnresolvedIncludes;
         public int RecoveredScripts;
         public int RecoveredConfigs;
+        public int PboToolsMarkerRoots;
+        public string PboToolsMarkerStyles;
         public int VerifiedP3ds;
         public int P3dCount;
         public int VerifiedConfigs;
@@ -31,9 +34,12 @@ namespace DayZModWorkbench
         {
             get
             {
-                return RecoveredScripts + " script(s) recuperado(s); P3D " + VerifiedP3ds + "/" +
+                string markerInfo = PboToolsMarkerRoots > 0
+                    ? " PBO Tools: " + PboToolsMarkerRoots + " raiz(es) confiável(is) [" + PboToolsMarkerStyles + "];"
+                    : string.Empty;
+                return RecoveredScripts + " script(s) recuperado(s);" + markerInfo + " P3D " + VerifiedP3ds + "/" +
                     P3dCount + " e config.bin " + VerifiedConfigs + "/" + ConfigCount +
-                    " semanticamente exatos; verificação v5 (scripts/P3D/configs): " +
+                    " semanticamente exatos; verificação v7 (scripts/P3D/configs): " +
                     VerificationStatus + ".";
             }
         }
@@ -50,12 +56,16 @@ namespace DayZModWorkbench
             if (!File.Exists(cfgConvertPath)) throw new FileNotFoundException("CfgConvert.exe não encontrado.", cfgConvertPath);
             string converterContents = File.ReadAllText(converterScriptPath);
             if (converterContents.IndexOf("verify_pbo_archive", StringComparison.Ordinal) < 0 ||
-                converterContents.IndexOf("PBO_EQUIVALENCE_VERIFICATION.txt", StringComparison.Ordinal) < 0)
-                throw new InvalidOperationException("O addon Python local não oferece verificação semântica v5. Conecte-se à internet para atualizá-lo.");
+                converterContents.IndexOf("PBO_EQUIVALENCE_VERIFICATION.txt", StringComparison.Ordinal) < 0 ||
+                converterContents.IndexOf("forensic_recover_rvmat_bytes", StringComparison.Ordinal) < 0 ||
+                converterContents.IndexOf("PBO_FULL_PAYLOAD_RECOVERY", StringComparison.Ordinal) < 0 ||
+                converterContents.IndexOf("PBO_TOOLS_MARKER_RECOVERY", StringComparison.Ordinal) < 0 ||
+                converterContents.IndexOf("PBO_TOOLS_V18_MARKER_RECOVERY", StringComparison.Ordinal) < 0)
+                throw new InvalidOperationException("O addon Python local não oferece verificação semântica v7. Conecte-se à internet para atualizá-lo.");
 
             Directory.CreateDirectory(outputRoot);
             string launcherOption = Path.GetFileName(pythonPath).Equals("py.exe", StringComparison.OrdinalIgnoreCase) ? "-3 " : string.Empty;
-            string arguments = launcherOption + ProcessRunner.Quote(converterScriptPath) + " " +
+            string arguments = launcherOption + "-u " + ProcessRunner.Quote(converterScriptPath) + " " +
                 ProcessRunner.Quote(pboPath) + " " + ProcessRunner.Quote(outputRoot) +
                 " --cfgconvert " + ProcessRunner.Quote(cfgConvertPath);
             ProcessResult process = await ProcessRunner.RunAsync(pythonPath, arguments,
@@ -69,7 +79,7 @@ namespace DayZModWorkbench
             string sourceRoot = Path.Combine(outputRoot, "recovered_source");
             if (!File.Exists(reportPath)) throw new InvalidOperationException("O addon não gerou o relatório de recuperação do PBO.");
             if (!File.Exists(manifestPath)) throw new InvalidOperationException("O addon não gerou o manifesto de recuperação do PBO.");
-            if (!File.Exists(verificationPath)) throw new InvalidOperationException("O addon v5 não gerou a verificação de equivalência do PBO.");
+            if (!File.Exists(verificationPath)) throw new InvalidOperationException("O addon v7 não gerou a verificação de equivalência do PBO.");
             if (!Directory.Exists(sourceRoot)) throw new InvalidOperationException("O addon não gerou a pasta recovered_source.");
 
             string report = File.ReadAllText(reportPath);
@@ -86,16 +96,18 @@ namespace DayZModWorkbench
                 ValidCompressedBlocks = ReadReportNumber(report, "Cprs blocks checksum-validated"),
                 UnresolvedIncludes = ReadReportNumber(report, "Unresolved includes")
             };
+            result.PboToolsMarkerRoots = ReadReportNumberOptional(report, "PBO Tools marker roots");
+            result.PboToolsMarkerStyles = ReadReportText(report, "PBO Tools marker styles");
             string verification = File.ReadAllText(verificationPath);
             result.VerificationStatus = ReadReportText(verification, "Overall");
             ReadReportRatio(verification, "Embedded P3Ds verified", out result.VerifiedP3ds, out result.P3dCount);
             ReadReportRatio(verification, "Configs semantic-verified", out result.VerifiedConfigs, out result.ConfigCount);
             if (!result.VerificationStatus.Equals("SEMANTIC-EXACT", StringComparison.OrdinalIgnoreCase) &&
                 !result.VerificationStatus.Equals("SEMANTIC-EXACT-INCLUDE-GRAPH", StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("O addon v5 não comprovou equivalência integral: " +
+                throw new InvalidOperationException("O addon v7 não comprovou equivalência integral: " +
                     result.VerificationStatus + ". Consulte " + verificationPath);
             if (result.VerifiedP3ds != result.P3dCount || result.VerifiedConfigs != result.ConfigCount)
-                throw new InvalidOperationException("Verificação v5 incompleta: P3D " + result.VerifiedP3ds + "/" +
+                throw new InvalidOperationException("Verificação v7 incompleta: P3D " + result.VerifiedP3ds + "/" +
                     result.P3dCount + ", configs " + result.VerifiedConfigs + "/" + result.ConfigCount + ".");
             bool archiveSha1Valid;
             if (!bool.TryParse(ReadReportText(report, "Archive SHA1 trailer valid"), out archiveSha1Valid) ||
@@ -116,12 +128,15 @@ namespace DayZModWorkbench
             if (recoveredFiles.Length < result.RecoveredFiles)
                 throw new InvalidOperationException("A pasta recuperada contém somente " + recoveredFiles.Length +
                     " arquivo(s), mas o relatório base informa " + result.RecoveredFiles + ".");
-            string configCpp = Path.Combine(sourceRoot, "config.cpp");
-            string configBin = Path.Combine(sourceRoot, "config.bin");
-            bool hasTextConfig = File.Exists(configCpp) && new FileInfo(configCpp).Length > 0;
-            bool hasBinaryConfig = File.Exists(configBin) && new FileInfo(configBin).Length > 0;
-            if (!hasTextConfig && !hasBinaryConfig)
-                throw new InvalidOperationException("A recuperação não produziu config.cpp nem config.bin utilizável.");
+            bool hasTextConfig = Directory.GetFiles(sourceRoot, "*.cpp", SearchOption.AllDirectories).Any(path =>
+                Path.GetFileName(path).IndexOf("config", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                new FileInfo(path).Length > 0);
+            bool hasBinaryConfig = Directory.GetFiles(sourceRoot, "*.bin", SearchOption.AllDirectories).Any(path =>
+                Path.GetFileName(path).Equals("config.bin", StringComparison.OrdinalIgnoreCase) &&
+                new FileInfo(path).Length > 0);
+            if (result.ConfigCount > 0 && !hasTextConfig && !hasBinaryConfig)
+                throw new InvalidOperationException("O PBO contém config verificado, mas a recuperação não produziu config.cpp/config.bin utilizável.");
+            // PBOs protegidos de dados podem ser válidos sem config raiz.
             if (result.UnresolvedIncludes > 0)
                 result.Warnings.Add(result.UnresolvedIncludes + " include(s) não puderam ser resolvidos; revise o source antes de compilar.");
 
@@ -136,6 +151,13 @@ namespace DayZModWorkbench
             return int.Parse(match.Groups[1].Value);
         }
 
+        private static int ReadReportNumberOptional(string report, string label)
+        {
+            Match match = Regex.Match(report, "^" + Regex.Escape(label) + @"\s*:\s*(\d+)\s*$",
+                RegexOptions.IgnoreCase | RegexOptions.Multiline);
+            return match.Success ? int.Parse(match.Groups[1].Value) : 0;
+        }
+
         private static string ReadReportText(string report, string label)
         {
             Match match = Regex.Match(report, "^" + Regex.Escape(label) + @"\s*:\s*(.*?)\s*$",
@@ -147,7 +169,7 @@ namespace DayZModWorkbench
         {
             Match match = Regex.Match(report, "^" + Regex.Escape(label) + @"\s*:\s*(\d+)\s*/\s*(\d+)",
                 RegexOptions.IgnoreCase | RegexOptions.Multiline);
-            if (!match.Success) throw new InvalidOperationException("Campo proporcional ausente no relatório v5: " + label);
+            if (!match.Success) throw new InvalidOperationException("Campo proporcional ausente no relatório v7: " + label);
             value = int.Parse(match.Groups[1].Value);
             total = int.Parse(match.Groups[2].Value);
         }

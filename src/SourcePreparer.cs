@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -20,6 +20,7 @@ namespace DayZModWorkbench
         public int MlodPreserved;
         public readonly List<string> Warnings = new List<string>();
         public readonly List<string> UnrecoverableFiles = new List<string>();
+        public bool IsPreAudit;
 
         public int ConvertedFiles
         {
@@ -44,7 +45,9 @@ namespace DayZModWorkbench
                     " config.bin e " + DataFilesConverted + " configuração(ões)/material(is). " +
                     "Auditoria RaP: " + RapFilesFound + " encontrado(s), " + ConvertedFiles +
                     " convertido(s), " + RapAlreadyEditable + " já acompanhado(s) por fonte válido e " +
-                    BinaryFilesPreserved + " preservado(s) ainda binário(s). " +
+                    BinaryFilesPreserved + (IsPreAudit
+                        ? " aguardando tentativa de recuperação v7. "
+                        : " preservado(s) ainda binário(s). ") +
                     TextureHeadersRemoved + " texheaders.bin removido(s) para regeneração no build. " +
                     OdolPreserved + " modelo(s) ODOL detectado(s) para reconstrução; " +
                     MlodPreserved + " modelo(s) MLOD preservado(s).";
@@ -62,18 +65,27 @@ namespace DayZModWorkbench
         };
 
         public static async Task<SourcePreparationResult> PrepareAsync(string sourceRoot, string cfgConvertPath,
-            Action<string> log)
+            Action<string> log, bool preAudit = false)
         {
             if (!Directory.Exists(sourceRoot)) throw new DirectoryNotFoundException("Source não encontrado: " + sourceRoot);
             if (!File.Exists(cfgConvertPath)) throw new FileNotFoundException("CfgConvert.exe não encontrado.", cfgConvertPath);
 
             SourcePreparationResult result = new SourcePreparationResult();
+            result.IsPreAudit = preAudit;
             string[] files = Directory.GetFiles(sourceRoot, "*", SearchOption.AllDirectories);
             result.FilesFound = files.Length;
 
             foreach (string file in files)
             {
                 string extension = Path.GetExtension(file);
+                if (Path.GetFileName(file).Equals("MODEL_CFG_EQUIVALENCE_VERIFICATION.txt",
+                    StringComparison.OrdinalIgnoreCase))
+                {
+                    File.Delete(file);
+                    if (log != null) log("Relatório temporário de verificação removido: " +
+                        RelativePath(sourceRoot, file));
+                    continue;
+                }
                 if (Path.GetFileName(file).Equals("texheaders.bin", StringComparison.OrdinalIgnoreCase))
                 {
                     File.Delete(file);
@@ -97,7 +109,7 @@ namespace DayZModWorkbench
                 if (!isConfig && !RapTextExtensions.Contains(extension))
                 {
                     RecordUnrecoverable(result, RelativePath(sourceRoot, file),
-                        "formato RaP não suportado", log);
+                        "formato RaP não suportado", log, preAudit);
                     continue;
                 }
 
@@ -123,7 +135,7 @@ namespace DayZModWorkbench
                     string parserError;
                     if (!RapTextConverter.TryConvert(file, temporary, out parserError))
                     {
-                        RecordUnrecoverable(result, RelativePath(sourceRoot, file), parserError, log);
+                        RecordUnrecoverable(result, RelativePath(sourceRoot, file), parserError, log, preAudit);
                         continue;
                     }
 
@@ -156,7 +168,7 @@ namespace DayZModWorkbench
                 }
                 catch (Exception ex)
                 {
-                    RecordUnrecoverable(result, RelativePath(sourceRoot, file), ex.Message, log);
+                    RecordUnrecoverable(result, RelativePath(sourceRoot, file), ex.Message, log, preAudit);
                 }
                 finally
                 {
@@ -169,7 +181,7 @@ namespace DayZModWorkbench
                 }
             }
 
-            if (result.UnrecoverableFiles.Count > 0)
+            if (result.UnrecoverableFiles.Count > 0 && !preAudit)
             {
                 string examples = string.Join(", ", result.UnrecoverableFiles.Take(8).ToArray());
                 if (result.UnrecoverableFiles.Count > 8) examples += ", …";
@@ -182,13 +194,46 @@ namespace DayZModWorkbench
         }
 
         private static void RecordUnrecoverable(SourcePreparationResult result, string relativePath,
-            string reason, Action<string> log)
+            string reason, Action<string> log, bool preAudit)
         {
             result.BinaryFilesPreserved++;
             result.UnrecoverableFiles.Add(relativePath);
-            if (log != null)
+            if (!preAudit && log != null)
                 log("Aviso: SOURCE NÃO TOTALMENTE EDITÁVEL — original binário preservado: " +
                     relativePath + ". " + reason);
+        }
+
+        internal static bool NeedsPythonConfigRecovery(string sourceRoot, out string reason)
+        {
+            reason = string.Empty;
+            if (string.IsNullOrWhiteSpace(sourceRoot) || !Directory.Exists(sourceRoot)) return false;
+
+            string configBin = Path.Combine(sourceRoot, "config.bin");
+            if (!File.Exists(configBin) || new FileInfo(configBin).Length == 0) return false;
+
+            string configCpp = Path.Combine(sourceRoot, "config.cpp");
+            if (!File.Exists(configCpp))
+            {
+                reason = "config.cpp ausente";
+                return true;
+            }
+
+            if (!IsUsableTextConfig(configCpp))
+            {
+                reason = new FileInfo(configCpp).Length == 0
+                    ? "config.cpp vazio"
+                    : "config.cpp inválido/não editável";
+                return true;
+            }
+
+            return false;
+        }
+
+        internal static bool HasUnrecoverableConfig(SourcePreparationResult result)
+        {
+            if (result == null) return false;
+            return result.UnrecoverableFiles.Any(path =>
+                Path.GetFileName(path).Equals("config.bin", StringComparison.OrdinalIgnoreCase));
         }
 
         private static bool IsUsableTextConfig(string path)

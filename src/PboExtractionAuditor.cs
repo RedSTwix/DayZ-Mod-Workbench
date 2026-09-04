@@ -23,7 +23,8 @@ namespace DayZModWorkbench
 
     internal static class PboExtractionAuditor
     {
-        internal static PboExtractionAuditResult Validate(string manifestPath, string extractedRoot)
+        internal static PboExtractionAuditResult Validate(string manifestPath, string extractedRoot,
+            Action<int, string> progress = null)
         {
             if (!File.Exists(manifestPath)) throw new FileNotFoundException("Manifesto do PBO não encontrado.", manifestPath);
             if (!Directory.Exists(extractedRoot)) throw new DirectoryNotFoundException("Extração do PBO não encontrada: " + extractedRoot);
@@ -48,6 +49,14 @@ namespace DayZModWorkbench
             List<string> failures = new List<string>();
             int payloads = 0;
             int verified = 0;
+            int totalPayloads = 0;
+            int lastReportedPercentage = -1;
+
+            foreach (object entryValue in entries)
+            {
+                Dictionary<string, object> entry = entryValue as Dictionary<string, object>;
+                if (entry != null && ReadString(entry, "kind") == "file") totalPayloads++;
+            }
 
             foreach (object entryValue in entries)
             {
@@ -55,6 +64,12 @@ namespace DayZModWorkbench
                 if (entry == null || ReadString(entry, "kind") != "file") continue;
                 payloads++;
                 string name = ReadString(entry, "decoded_name");
+                int auditPercentage = (int)Math.Floor((payloads - 1) * 95d / Math.Max(1, totalPayloads));
+                if (progress != null && auditPercentage != lastReportedPercentage)
+                {
+                    lastReportedPercentage = auditPercentage;
+                    progress(auditPercentage, string.IsNullOrWhiteSpace(name) ? "entrada " + payloads : name);
+                }
                 string expectedSha1 = ReadString(entry, "decompressed_sha1");
                 if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(expectedSha1))
                 {
@@ -98,6 +113,7 @@ namespace DayZModWorkbench
                 verified++;
             }
 
+            if (progress != null) progress(95, "conferindo arquivos extras");
             string[] extractedFiles = Directory.GetFiles(extractedRoot, "*", SearchOption.AllDirectories);
             foreach (string file in extractedFiles)
                 if (!expectedPaths.Contains(Path.GetFullPath(file))) failures.Add(RelativePath(root, file) + " (arquivo extra)");
@@ -111,6 +127,7 @@ namespace DayZModWorkbench
                     payloads + " payload(s) verificado(s). " + details);
             }
 
+            if (progress != null) progress(100, "integridade aprovada");
             return new PboExtractionAuditResult { PayloadFiles = payloads, VerifiedFiles = verified };
         }
 
