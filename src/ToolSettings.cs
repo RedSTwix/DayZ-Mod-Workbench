@@ -22,7 +22,11 @@ namespace DayZModWorkbench
         public string WorkshopPath;
         public string EditorDependencies;
         public string ServerKeysPath;
+        public string BackupPath;
         public string ExtraLaunchArgs;
+        public int? WindowX;
+        public int? WindowY;
+        public bool WindowMaximized;
 
         public static string SettingsFile
         {
@@ -53,6 +57,7 @@ namespace DayZModWorkbench
                 WorkshopPath = workshop,
                 EditorDependencies = Path.Combine(workshop, "@CF") + ";" + Path.Combine(workshop, "@Dabs Framework"),
                 ServerKeysPath = @"C:\DayZServer\keys",
+                BackupPath = Path.Combine(desktop, @"Mods backup\DayZ Mod Workbench"),
                 ExtraLaunchArgs = "-noPause -noSplash -skipIntro -doLogs -world=empty"
             };
         }
@@ -95,7 +100,17 @@ namespace DayZModWorkbench
             result.WorkshopPath = Get(values, "WorkshopPath", result.WorkshopPath);
             result.EditorDependencies = Get(values, "EditorDependencies", result.EditorDependencies);
             result.ServerKeysPath = Get(values, "ServerKeysPath", result.ServerKeysPath);
+            result.BackupPath = Get(values, "BackupPath", result.BackupPath);
             result.ExtraLaunchArgs = Get(values, "ExtraLaunchArgs", result.ExtraLaunchArgs);
+            int windowCoordinate;
+            string windowValue;
+            if (values.TryGetValue("WindowX", out windowValue) &&
+                int.TryParse(windowValue, out windowCoordinate)) result.WindowX = windowCoordinate;
+            if (values.TryGetValue("WindowY", out windowValue) &&
+                int.TryParse(windowValue, out windowCoordinate)) result.WindowY = windowCoordinate;
+            bool maximized;
+            if (values.TryGetValue("WindowMaximized", out windowValue) &&
+                bool.TryParse(windowValue, out maximized)) result.WindowMaximized = maximized;
             return result;
         }
 
@@ -126,7 +141,11 @@ namespace DayZModWorkbench
                 "WorkshopPath=" + WorkshopPath,
                 "EditorDependencies=" + EditorDependencies,
                 "ServerKeysPath=" + ServerKeysPath,
-                "ExtraLaunchArgs=" + ExtraLaunchArgs
+                "BackupPath=" + BackupPath,
+                "ExtraLaunchArgs=" + ExtraLaunchArgs,
+                "WindowX=" + (WindowX.HasValue ? WindowX.Value.ToString() : string.Empty),
+                "WindowY=" + (WindowY.HasValue ? WindowY.Value.ToString() : string.Empty),
+                "WindowMaximized=" + WindowMaximized
             };
             File.WriteAllLines(SettingsFile, lines);
         }

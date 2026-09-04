@@ -8,5 +8,5 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyCopyright("SharpAxe")]
 [assembly: ComVisible(false)]
 [assembly: Guid("8f32cb83-5f89-4f90-a91e-3f49a0bfbf69")]
-[assembly: AssemblyVersion("1.0.0.0")]
-[assembly: AssemblyFileVersion("1.0.0.0")]
+[assembly: AssemblyVersion("1.7.6.0")]
+[assembly: AssemblyFileVersion("1.7.6.0")]

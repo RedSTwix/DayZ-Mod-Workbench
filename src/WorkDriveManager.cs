@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace DayZModWorkbench
@@ -18,6 +20,8 @@ namespace DayZModWorkbench
 
     internal static class WorkDriveManager
     {
+        private const int OperationTimeoutMilliseconds = 20000;
+
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern uint QueryDosDevice(string deviceName, StringBuilder targetPath, int maximumLength);
 
@@ -69,17 +73,88 @@ namespace DayZModWorkbench
         {
             if (!File.Exists(executable)) throw new FileNotFoundException("WorkDrive.exe do DayZ Tools não encontrado.", executable);
             string argument = mount ? "/Mount" : "/Dismount";
-            // WorkDrive 1.2 completes the requested action and then may throw from
-            // Console.ReadKey when launched without a console. Capture its output
-            // silently and accept only the official success marker.
-            ProcessResult result = await ProcessRunner.RunAsync(executable, argument, Path.GetDirectoryName(executable), null);
             string successMarker = mount ? "Work drive mounted" : "Work drive unmounted";
+            ProcessResult result;
+            try
+            {
+                result = await RunUntilSuccessMarkerAsync(executable, argument, successMarker);
+            }
+            catch (TimeoutException)
+            {
+                throw new InvalidOperationException(
+                    "O WorkDrive não respondeu em 20 segundos. Confirme que a Steam está aberta, com o login ativo, e tente novamente.");
+            }
             if (result.ExitCode != 0 && (result.Output == null ||
                 result.Output.IndexOf(successMarker, StringComparison.OrdinalIgnoreCase) < 0))
                 throw new InvalidOperationException("WorkDrive terminou com código " + result.ExitCode + ". " +
                     (result.Output ?? string.Empty).Trim());
             if (log != null) log(successMarker + ".");
             return result;
+        }
+
+        private static Task<ProcessResult> RunUntilSuccessMarkerAsync(string executable, string argument,
+            string successMarker)
+        {
+            return Task.Run(delegate
+            {
+                StringBuilder output = new StringBuilder();
+                using (ManualResetEventSlim markerFound = new ManualResetEventSlim(false))
+                using (Process process = new Process())
+                {
+                    process.StartInfo = new ProcessStartInfo
+                    {
+                        FileName = executable,
+                        Arguments = argument,
+                        WorkingDirectory = Path.GetDirectoryName(executable),
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true
+                    };
+                    DataReceivedEventHandler capture = delegate(object sender, DataReceivedEventArgs e)
+                    {
+                        if (e.Data == null) return;
+                        lock (output) output.AppendLine(e.Data);
+                        if (e.Data.IndexOf(successMarker, StringComparison.OrdinalIgnoreCase) >= 0)
+                            markerFound.Set();
+                    };
+                    process.OutputDataReceived += capture;
+                    process.ErrorDataReceived += capture;
+                    process.Start();
+                    process.BeginOutputReadLine();
+                    process.BeginErrorReadLine();
+
+                    Stopwatch elapsed = Stopwatch.StartNew();
+                    while (!markerFound.IsSet && !process.HasExited &&
+                        elapsed.ElapsedMilliseconds < OperationTimeoutMilliseconds)
+                        markerFound.Wait(50);
+
+                    if (process.HasExited)
+                    {
+                        // Flush the asynchronous output handlers before checking
+                        // whether the final line contained the success marker.
+                        process.WaitForExit();
+                    }
+                    else if (markerFound.IsSet)
+                    {
+                        // WorkDrive 1.2 waits for a key after completing the action.
+                        // The official marker means the mount/dismount is already done.
+                        try { process.Kill(); } catch { }
+                        try { process.WaitForExit(2000); } catch { }
+                    }
+                    else
+                    {
+                        try { process.Kill(); } catch { }
+                        try { process.WaitForExit(2000); } catch { }
+                        throw new TimeoutException();
+                    }
+
+                    string text;
+                    lock (output) text = output.ToString();
+                    int exitCode = process.HasExited ? process.ExitCode : -1;
+                    return new ProcessResult { ExitCode = exitCode, Output = text };
+                }
+            });
         }
 
         internal static bool IsManagedMapping(string executable, WorkDriveState state)

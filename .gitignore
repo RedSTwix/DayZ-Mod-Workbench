@@ -30,3 +30,5 @@ addons/
 
 # Chaves privadas locais; nunca versionar ou distribuir
 keys/
+senha.txt
+configs/
