@@ -18,6 +18,8 @@ namespace DayZModWorkbench
 
         private const int SupportedManifestSchema = 1;
         private const int SupportedAddonApi = 1;
+        private const string MinimumManagedAddonVersion = "8.0.1";
+        private const string RequiredManagedCapability = "GENERIC_DECOY_FILTER";
 
         private const string ManifestUrl =
             "https://raw.githubusercontent.com/RedSTwix/DayZ-Mod-Workbench-Updates/main/manifest.json";
@@ -699,6 +701,7 @@ namespace DayZModWorkbench
 
             string bootstrap = Path.Combine(payloadRoot, "deodol_source_windows.py");
             string engine = Path.Combine(payloadRoot, "deodol_engine");
+            string engineManifestPath = Path.Combine(engine, "manifest.json");
 
             if (!File.Exists(bootstrap))
                 throw new InvalidOperationException(
@@ -712,7 +715,10 @@ namespace DayZModWorkbench
             {
                 Path.Combine(engine, "__init__.py"),
                 Path.Combine(engine, "version.py"),
-                Path.Combine(engine, "runner.py")
+                Path.Combine(engine, "runner.py"),
+                engineManifestPath,
+                Path.Combine(engine, "pbo", "verifier.py"),
+                Path.Combine(engine, "techniques", "generic_include_graph.py")
             };
 
             foreach (string required in requiredFiles)
@@ -732,11 +738,39 @@ namespace DayZModWorkbench
 
             if (script.IndexOf("SCRIPT_VERSION", StringComparison.Ordinal) < 0 ||
                 script.IndexOf("deodol_engine", StringComparison.Ordinal) < 0 ||
-                script.IndexOf("--cfgconvert", StringComparison.Ordinal) < 0)
+                script.IndexOf("--cfgconvert", StringComparison.Ordinal) < 0 ||
+                script.IndexOf("GENERIC_DECOY_FILTER", StringComparison.Ordinal) < 0)
             {
                 throw new InvalidOperationException(
                     "O bootstrap do addon modular não contém os marcadores esperados.");
             }
+
+            InstalledAddonManifest installedManifest;
+            try
+            {
+                JavaScriptSerializer serializer = new JavaScriptSerializer();
+                string manifestJson = File.ReadAllText(engineManifestPath, Encoding.UTF8).TrimStart('\uFEFF');
+                installedManifest = serializer.Deserialize<InstalledAddonManifest>(manifestJson);
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException("addons\\deodol_engine\\manifest.json é inválido.", ex);
+            }
+
+            if (installedManifest == null || string.IsNullOrWhiteSpace(installedManifest.engine))
+                throw new InvalidOperationException("O manifesto local do addon não contém engine.");
+            Version installedEngine = ParseVersion(installedManifest.engine, "engine local do addon");
+            Version minimumEngine = ParseVersion(MinimumManagedAddonVersion, "engine mínimo do addon");
+            if (installedEngine.CompareTo(minimumEngine) < 0)
+                throw new InvalidOperationException("Addon modular antigo (" + installedManifest.engine +
+                    "); o Workbench 1.7.7 exige " + MinimumManagedAddonVersion + " ou superior.");
+            if (installedManifest.api != SupportedAddonApi)
+                throw new InvalidOperationException("API do addon local não suportada: " + installedManifest.api + ".");
+            if (installedManifest.capabilities == null ||
+                Array.FindIndex(installedManifest.capabilities, capability =>
+                    string.Equals(capability, RequiredManagedCapability, StringComparison.OrdinalIgnoreCase)) < 0)
+                throw new InvalidOperationException("O addon modular não declara a capability obrigatória " +
+                    RequiredManagedCapability + ".");
 
             string[] pythonFiles = Directory.GetFiles(
                 engine, "*.py", SearchOption.AllDirectories);
@@ -985,6 +1019,9 @@ namespace DayZModWorkbench
             Match versionMatch = Regex.Match(script,
                 "(?m)^\\s*SCRIPT_VERSION\\s*=\\s*['\"]([^'\"]+)['\"]\\s*$");
 
+            if (script.IndexOf("from deodol_engine", StringComparison.Ordinal) >= 0)
+                throw new InvalidOperationException("O bootstrap modular não pode ser usado como fallback legado.");
+
             if (!versionMatch.Success ||
                 script.IndexOf("def convert_file(", StringComparison.Ordinal) < 0 ||
                 script.IndexOf("def convert_tree(", StringComparison.Ordinal) < 0 ||
@@ -1190,6 +1227,15 @@ namespace DayZModWorkbench
             }
 
             return fullPath;
+        }
+
+        public sealed class InstalledAddonManifest
+        {
+            public string engine { get; set; }
+            public int api { get; set; }
+            public string entrypoint { get; set; }
+            public string script_version { get; set; }
+            public string[] capabilities { get; set; }
         }
 
         public sealed class UpdateManifest
