@@ -213,6 +213,11 @@ namespace DayZModWorkbench
                         return ReadInt32().ToString(CultureInfo.InvariantCulture);
                     case 4:
                         return ReadCString();
+                    case 6:
+                        // BI/DayZ RaP subtype 6 stores a signed 64-bit integer.
+                        // Large values (for example very high hitpoints in some mods)
+                        // cannot be represented as subtype 2 / Int32.
+                        return ReadInt64().ToString(CultureInfo.InvariantCulture);
                     default:
                         throw new InvalidDataException("subtipo de valor RaP desconhecido: " + subtype);
                 }
@@ -261,6 +266,14 @@ namespace DayZModWorkbench
                 Require(4);
                 int value = BitConverter.ToInt32(_data, _position);
                 _position += 4;
+                return value;
+            }
+
+            private long ReadInt64()
+            {
+                Require(8);
+                long value = BitConverter.ToInt64(_data, _position);
+                _position += 8;
                 return value;
             }
 

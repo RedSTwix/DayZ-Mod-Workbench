@@ -10,13 +10,25 @@ namespace DayZModWorkbench
     {
         public int PayloadFiles;
         public int VerifiedFiles;
+        public int TransformedFiles;
+        public bool PreparedSourceAudit;
+
+        public int AccountedFiles
+        {
+            get { return VerifiedFiles + TransformedFiles; }
+        }
 
         public string Summary
         {
             get
             {
-                return "auditoria integral aprovada: " + VerifiedFiles + "/" + PayloadFiles +
-                    " payload(s) extraído(s) com SHA-1 idêntico ao PBO";
+                if (!PreparedSourceAudit)
+                    return "auditoria integral aprovada: " + VerifiedFiles + "/" + PayloadFiles +
+                        " payload(s) extraído(s) com SHA-1 idêntico ao PBO";
+
+                return "auditoria da source preparada aprovada: " + AccountedFiles + "/" + PayloadFiles +
+                    " payload(s) contabilizado(s) — " + VerifiedFiles + " SHA-1 idêntico(s) e " +
+                    TransformedFiles + " transformação(ões) legítima(s) da preparação";
             }
         }
     }
@@ -25,6 +37,22 @@ namespace DayZModWorkbench
     {
         internal static PboExtractionAuditResult Validate(string manifestPath, string extractedRoot,
             Action<int, string> progress = null)
+        {
+            return ValidateCore(manifestPath, extractedRoot, progress, false);
+        }
+
+        // Use only after SourcePreparer has already transformed the BankRev tree.
+        // config.bin -> config.cpp and removal of texHeaders.bin are legitimate source
+        // preparation steps and must not be mistaken for lost PBO payloads. Every other
+        // original payload remains subject to the same strict SHA-1 comparison.
+        internal static PboExtractionAuditResult ValidatePreparedSource(string manifestPath, string extractedRoot,
+            Action<int, string> progress = null)
+        {
+            return ValidateCore(manifestPath, extractedRoot, progress, true);
+        }
+
+        private static PboExtractionAuditResult ValidateCore(string manifestPath, string extractedRoot,
+            Action<int, string> progress, bool preparedSourceAudit)
         {
             if (!File.Exists(manifestPath)) throw new FileNotFoundException("Manifesto do PBO não encontrado.", manifestPath);
             if (!Directory.Exists(extractedRoot)) throw new DirectoryNotFoundException("Extração do PBO não encontrada: " + extractedRoot);
@@ -46,9 +74,11 @@ namespace DayZModWorkbench
             string root = Path.GetFullPath(extractedRoot).TrimEnd(Path.DirectorySeparatorChar,
                 Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
             HashSet<string> expectedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            HashSet<string> allowedPreparedExtras = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             List<string> failures = new List<string>();
             int payloads = 0;
             int verified = 0;
+            int transformed = 0;
             int totalPayloads = 0;
             int lastReportedPercentage = -1;
 
@@ -100,8 +130,25 @@ namespace DayZModWorkbench
                 }
                 if (!File.Exists(target))
                 {
+                    string preparedReplacement;
+                    if (preparedSourceAudit && TryAcceptPreparedTransformation(target, out preparedReplacement))
+                    {
+                        transformed++;
+                        if (!string.IsNullOrWhiteSpace(preparedReplacement))
+                            allowedPreparedExtras.Add(Path.GetFullPath(preparedReplacement));
+                        continue;
+                    }
+
                     failures.Add(name + " (não extraído)");
                     continue;
+                }
+
+                // A config.cpp generated from a still-present config.bin is also an
+                // expected artifact of SourcePreparer and must not be reported as extra.
+                if (preparedSourceAudit && Path.GetFileName(target).Equals("config.bin", StringComparison.OrdinalIgnoreCase))
+                {
+                    string cpp = Path.Combine(Path.GetDirectoryName(target), "config.cpp");
+                    if (IsUsablePreparedConfig(cpp)) allowedPreparedExtras.Add(Path.GetFullPath(cpp));
                 }
 
                 string actualSha1 = ComputeSha1(target);
@@ -116,19 +163,77 @@ namespace DayZModWorkbench
             if (progress != null) progress(95, "conferindo arquivos extras");
             string[] extractedFiles = Directory.GetFiles(extractedRoot, "*", SearchOption.AllDirectories);
             foreach (string file in extractedFiles)
-                if (!expectedPaths.Contains(Path.GetFullPath(file))) failures.Add(RelativePath(root, file) + " (arquivo extra)");
+            {
+                string full = Path.GetFullPath(file);
+                if (!expectedPaths.Contains(full) && !allowedPreparedExtras.Contains(full))
+                    failures.Add(RelativePath(root, file) + " (arquivo extra)");
+            }
 
             if (payloads == 0) throw new InvalidDataException("O manifesto não contém payloads de arquivo.");
-            if (verified != payloads || failures.Count > 0 || extractedFiles.Length != expectedPaths.Count)
+            if (verified + transformed != payloads || failures.Count > 0)
             {
-                string details = failures.Count == 0 ? "contagem de arquivos diferente" :
+                string details = failures.Count == 0 ? "contagem de payloads contabilizados diferente" :
                     string.Join("; ", failures.GetRange(0, Math.Min(8, failures.Count)).ToArray());
-                throw new InvalidDataException("Auditoria integral da extração falhou: " + verified + "/" +
-                    payloads + " payload(s) verificado(s). " + details);
+                string mode = preparedSourceAudit ? "Auditoria da source preparada falhou: " :
+                    "Auditoria integral da extração falhou: ";
+                throw new InvalidDataException(mode + verified + "/" + payloads +
+                    " payload(s) com SHA-1 idêntico(s), " + transformed + " transformação(ões) legítima(s). " + details);
             }
 
             if (progress != null) progress(100, "integridade aprovada");
-            return new PboExtractionAuditResult { PayloadFiles = payloads, VerifiedFiles = verified };
+            return new PboExtractionAuditResult
+            {
+                PayloadFiles = payloads,
+                VerifiedFiles = verified,
+                TransformedFiles = transformed,
+                PreparedSourceAudit = preparedSourceAudit
+            };
+        }
+
+        private static bool TryAcceptPreparedTransformation(string originalPath, out string replacementPath)
+        {
+            replacementPath = string.Empty;
+            string fileName = Path.GetFileName(originalPath);
+
+            // texHeaders.bin is a generated texture index/cache. SourcePreparer
+            // intentionally removes it; Addon Builder regenerates it on build.
+            if (fileName.Equals("texHeaders.bin", StringComparison.OrdinalIgnoreCase)) return true;
+
+            // SourcePreparer converts config.bin into an editable sibling config.cpp
+            // and deletes the binary only after the text passes CfgConvert validation.
+            if (!fileName.Equals("config.bin", StringComparison.OrdinalIgnoreCase)) return false;
+            string cpp = Path.Combine(Path.GetDirectoryName(originalPath), "config.cpp");
+            if (!IsUsablePreparedConfig(cpp)) return false;
+            replacementPath = cpp;
+            return true;
+        }
+
+        private static bool IsUsablePreparedConfig(string path)
+        {
+            try
+            {
+                if (!File.Exists(path) || new FileInfo(path).Length == 0) return false;
+                using (FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+                {
+                    if (stream.Length >= 4)
+                    {
+                        int a = stream.ReadByte();
+                        int b = stream.ReadByte();
+                        int c = stream.ReadByte();
+                        int d = stream.ReadByte();
+                        if (a == 0 && b == 0x72 && c == 0x61 && d == 0x50) return false;
+                    }
+                }
+                using (StreamReader reader = new StreamReader(path, true))
+                {
+                    char[] buffer = new char[4096];
+                    int read = reader.Read(buffer, 0, buffer.Length);
+                    for (int i = 0; i < read; i++)
+                        if (!char.IsWhiteSpace(buffer[i])) return true;
+                }
+            }
+            catch { }
+            return false;
         }
 
         private static string ReadString(Dictionary<string, object> value, string key)

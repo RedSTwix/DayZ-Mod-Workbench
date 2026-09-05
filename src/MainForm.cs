@@ -45,7 +45,9 @@ namespace DayZModWorkbench
 
         private ToolSettings _settings;
         private ComboBox _projectCombo;
+        private TextBox _pboSearch;
         private ListBox _pboList;
+        private readonly List<PathItem> _projectPbos = new List<PathItem>();
         private ComboBox _sourceCombo;
         private GroupBox _pboActionsGroup;
         private GroupBox _buildActionsGroup;
@@ -375,23 +377,43 @@ namespace DayZModWorkbench
 
             _pboActionsGroup = new GroupBox { Text = "PBOs encontrados no projeto", Dock = DockStyle.Fill, Padding = new Padding(10) };
             GroupBox pboGroup = _pboActionsGroup;
-            TableLayoutPanel pboLayout = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 3, ColumnCount = 1 };
+            TableLayoutPanel pboLayout = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 4, ColumnCount = 1 };
+            pboLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
             pboLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             pboLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
             pboLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 45));
-            _pboList = new ListBox { Dock = DockStyle.Fill, HorizontalScrollbar = true };
+            TableLayoutPanel pboSearchLayout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 2,
+                RowCount = 1,
+                Margin = new Padding(0)
+            };
+            pboSearchLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 105));
+            pboSearchLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            pboSearchLayout.Controls.Add(FieldLabel("Pesquisar PBO:"), 0, 0);
+            _pboSearch = new TextBox { Dock = DockStyle.Fill };
+            _pboSearch.TextChanged += delegate { RefreshPboList(); };
+            pboSearchLayout.Controls.Add(_pboSearch, 1, 0);
+            pboLayout.Controls.Add(pboSearchLayout, 0, 0);
+            _pboList = new ListBox
+            {
+                Dock = DockStyle.Fill,
+                HorizontalScrollbar = true,
+                SelectionMode = SelectionMode.MultiExtended
+            };
             _pboList.SelectedIndexChanged += delegate { UpdateProjectActionAvailability(); };
-            pboLayout.Controls.Add(_pboList, 0, 0);
+            pboLayout.Controls.Add(_pboList, 0, 1);
             pboLayout.Controls.Add(new Label
             {
                 Text = "O conteúdo será extraído para source\\NomeDoPBO.",
                 Dock = DockStyle.Fill,
                 ForeColor = Color.Silver,
                 TextAlign = ContentAlignment.MiddleLeft
-            }, 0, 1);
-            _extractPboButton = MakeButton("Extrair PBO selecionado → source", _accent);
+            }, 0, 2);
+            _extractPboButton = MakeButton("Extrair PBO(s) selecionado(s) → source", _accent);
             _extractPboButton.Click += async delegate { await ExtractSelectedPbo(); };
-            pboLayout.Controls.Add(_extractPboButton, 0, 2);
+            pboLayout.Controls.Add(_extractPboButton, 0, 3);
             _operationControls.Add(_extractPboButton);
             pboGroup.Controls.Add(pboLayout);
             split.Panel1.Controls.Add(pboGroup);
@@ -1429,7 +1451,7 @@ namespace DayZModWorkbench
                         Log(pboName + ": " + configRecoveryReason +
                             " detectado; acionando addon Python v7 para recuperar config/scripts.", _accent);
                         ReportSteamPboProgress(progress, 0.50d, progressName + " — recuperando config e scripts");
-                        PboSourceRecoveryResult recovery = await RecoverProtectedPbo(pbo, tempRoot, progress, pboName);
+                        PboSourceRecoveryResult recovery = await RecoverProtectedPbo(pbo, tempRoot, progress, pboName, true);
                         ShowSteamDetailProgress(0, pboName + " — verificando integridade dos arquivos");
                         PboExtractionAuditResult audit = await Task.Run(delegate
                         {
@@ -1480,11 +1502,11 @@ namespace DayZModWorkbench
                         Log(pboName + ": config.bin permaneceu não editável após o conversor interno; " +
                             "acionando fallback do addon Python v7.", _accent);
                         ReportSteamPboProgress(progress, 0.70d, progressName + " — fallback de recuperação");
-                        PboSourceRecoveryResult recovery = await RecoverProtectedPbo(pbo, tempRoot, progress, pboName);
+                        PboSourceRecoveryResult recovery = await RecoverProtectedPbo(pbo, tempRoot, progress, pboName, true);
                         ShowSteamDetailProgress(0, pboName + " — verificando integridade dos arquivos");
                         PboExtractionAuditResult audit = await Task.Run(delegate
                         {
-                            return PboExtractionAuditor.Validate(recovery.ManifestPath, extractedRoot,
+                            return PboExtractionAuditor.ValidatePreparedSource(recovery.ManifestPath, extractedRoot,
                                 delegate(int percentage, string file)
                                 {
                                     UpdateSteamDetailProgress(percentage,
@@ -1494,8 +1516,9 @@ namespace DayZModWorkbench
                                 });
                         });
                         Log(pboName + ": " + audit.Summary + ".", _success);
-                        _steamImportVerifications.Add(pboName + ": " + audit.VerifiedFiles + "/" +
-                            audit.PayloadFiles + " arquivos conferidos por SHA-1");
+                        _steamImportVerifications.Add(pboName + ": " + audit.AccountedFiles + "/" +
+                            audit.PayloadFiles + " payloads contabilizados (" + audit.VerifiedFiles +
+                            " SHA-1 exatos, " + audit.TransformedFiles + " transformações legítimas)");
                         _steamImportVerifications.Add(pboName + ": v7 " + recovery.VerificationStatus +
                             " — scripts " + recovery.RecoveredScripts + ", P3D " + recovery.VerifiedP3ds + "/" +
                             recovery.P3dCount + ", configs " + recovery.VerifiedConfigs + "/" + recovery.ConfigCount);
@@ -1615,7 +1638,8 @@ namespace DayZModWorkbench
         }
 
         private async Task<PboSourceRecoveryResult> RecoverProtectedPbo(string pboPath, string tempRoot,
-            SteamImportProgressState importProgress = null, string pboName = null)
+            SteamImportProgressState importProgress = null, string pboName = null,
+            bool deferSourceEditabilityWarnings = false)
         {
             bool showProgress = importProgress != null && _steamImportProgressActive;
             string displayName = string.IsNullOrWhiteSpace(pboName) ? Path.GetFileNameWithoutExtension(pboPath) : pboName;
@@ -1635,7 +1659,7 @@ namespace DayZModWorkbench
                 if (showProgress) UpdateSteamDetailProgress(82, displayName + " — validando relatórios");
                 RemoveVerifiedConfigBins(recovery.SourceRoot);
                 SourcePreparationResult preparation = await SourcePreparer.PrepareAsync(recovery.SourceRoot,
-                    _settings.CfgConvertPath, LogLine);
+                    _settings.CfgConvertPath, LogLine, deferSourceEditabilityWarnings);
                 recovery.Warnings.AddRange(preparation.Warnings);
                 if (showProgress) UpdateSteamDetailProgress(100, displayName + " — verificação concluída");
                 return recovery;
@@ -2079,6 +2103,7 @@ namespace DayZModWorkbench
         private void RefreshProjectContents()
         {
             _pboList.Items.Clear();
+            _projectPbos.Clear();
             _sourceCombo.Items.Clear();
             PathItem project = SelectedProject;
             if (project == null)
@@ -2091,8 +2116,8 @@ namespace DayZModWorkbench
                 .Where(path => !IsDerivedOrSourcePath(project.FullPath, path))
                 .OrderBy(path => RelativePath(project.FullPath, path), StringComparer.CurrentCultureIgnoreCase);
             foreach (string pbo in pbos)
-                _pboList.Items.Add(new PathItem { Name = RelativePath(project.FullPath, pbo), FullPath = pbo });
-            if (_pboList.Items.Count > 0) _pboList.SelectedIndex = 0;
+                _projectPbos.Add(new PathItem { Name = RelativePath(project.FullPath, pbo), FullPath = pbo });
+            RefreshPboList();
 
             string sourceRoot = Path.Combine(project.FullPath, "source");
             if (Directory.Exists(sourceRoot))
@@ -2102,7 +2127,38 @@ namespace DayZModWorkbench
             }
             if (_sourceCombo.Items.Count > 0) _sourceCombo.SelectedIndex = 0;
             UpdateProjectActionAvailability();
-            SetStatus(project.Name + ": " + _pboList.Items.Count + " PBO(s), " + _sourceCombo.Items.Count + " source(s)");
+            SetStatus(project.Name + ": " + _projectPbos.Count + " PBO(s), " + _sourceCombo.Items.Count + " source(s)");
+        }
+
+        private void RefreshPboList()
+        {
+            if (_pboList == null) return;
+            HashSet<string> selectedPaths = new HashSet<string>(
+                _pboList.SelectedItems.Cast<PathItem>().Select(item => item.FullPath),
+                StringComparer.OrdinalIgnoreCase);
+            string filter = _pboSearch == null ? string.Empty : _pboSearch.Text.Trim();
+
+            _pboList.BeginUpdate();
+            try
+            {
+                _pboList.Items.Clear();
+                foreach (PathItem item in _projectPbos.Where(candidate =>
+                    string.IsNullOrWhiteSpace(filter) ||
+                    candidate.Name.IndexOf(filter, StringComparison.CurrentCultureIgnoreCase) >= 0))
+                {
+                    int index = _pboList.Items.Add(item);
+                    if (selectedPaths.Contains(item.FullPath)) _pboList.SetSelected(index, true);
+                }
+
+                if (_pboList.SelectedItems.Count == 0 && _pboList.Items.Count > 0)
+                    _pboList.SelectedIndex = 0;
+                if (_pboList.Items.Count > 0) _pboList.TopIndex = 0;
+            }
+            finally
+            {
+                _pboList.EndUpdate();
+            }
+            UpdateProjectActionAvailability();
         }
 
         private void UpdateProjectActionAvailability()
@@ -2136,10 +2192,10 @@ namespace DayZModWorkbench
         private async Task ExtractSelectedPbo()
         {
             PathItem project = SelectedProject;
-            PathItem pbo = SelectedPbo;
-            if (project == null || pbo == null)
+            List<PathItem> pbos = _pboList.SelectedItems.Cast<PathItem>().ToList();
+            if (project == null || pbos.Count == 0)
             {
-                MessageBox.Show(this, "Selecione um projeto e um PBO.", "Extração",
+                MessageBox.Show(this, "Selecione um projeto e pelo menos um PBO.", "Extração",
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
@@ -2150,42 +2206,82 @@ namespace DayZModWorkbench
                 return;
             }
 
-            string name = Path.GetFileNameWithoutExtension(pbo.FullPath);
-            string destination = Path.Combine(project.FullPath, "source", name);
-            if (Directory.Exists(destination) && Directory.EnumerateFileSystemEntries(destination).Any())
+            List<string> selectedPboPaths = pbos.Select(item => item.FullPath).ToList();
+            int selectedPboTopIndex = _pboList.TopIndex;
+            int existingSources = pbos.Count(item =>
             {
-                DialogResult answer = MessageBox.Show(this,
-                    "O source já existe. Deseja substituí-lo pela nova extração?",
-                    "Source existente", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                string sourceName = Path.GetFileNameWithoutExtension(item.FullPath);
+                string sourcePath = Path.Combine(project.FullPath, "source", sourceName);
+                return Directory.Exists(sourcePath) && Directory.EnumerateFileSystemEntries(sourcePath).Any();
+            });
+            if (existingSources > 0)
+            {
+                string question = existingSources == 1 && pbos.Count == 1
+                    ? "O source já existe. Deseja substituí-lo pela nova extração?"
+                    : existingSources + " source(s) da seleção já existem. Deseja substituí-los durante a fila?";
+                DialogResult answer = MessageBox.Show(this, question, "Source existente",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Question);
                 if (answer != DialogResult.Yes) return;
             }
 
             SteamImportProgressState progress = new SteamImportProgressState
             {
-                TotalPbos = 1,
+                TotalPbos = pbos.Count,
                 Extract = true,
                 IncludesCopy = false
             };
             try
             {
-                SetBusy(true, "Extraindo e preparando " + Path.GetFileName(pbo.FullPath));
-                BeginSteamImportProgress(true, 1, "Progresso da extração do PBO selecionado");
+                SetBusy(true, "Extraindo fila de " + pbos.Count + " PBO(s)");
+                BeginSteamImportProgress(true, pbos.Count,
+                    pbos.Count == 1
+                        ? "Progresso da extração do PBO selecionado"
+                        : "Progresso da fila de extração");
                 _steamImportWarnings.Clear();
                 _steamImportVerifications.Clear();
-                ResetSteamDetailProgress(name);
-                SetSteamOverallProgress(0, name + " — iniciando extração");
+                List<string> extractedSources = new List<string>();
+                List<string> failedPbos = new List<string>();
+                string lastSourceName = null;
+                SetSteamOverallProgress(0, "Fila preparada — " + pbos.Count + " PBO(s)");
 
-                await ExtractImportedPbo(project.FullPath, pbo.FullPath, progress, project.Name);
-                if (Directory.Exists(destination)) MoveProjectMetadataToSource(project.FullPath);
-                CompleteSteamPboProgress(progress, name + " concluído");
-                SetSteamOverallProgress(100, _steamImportWarnings.Count == 0
-                    ? "Extração concluída"
-                    : "Extração concluída com pendências");
+                foreach (PathItem pbo in pbos)
+                {
+                    string name = Path.GetFileNameWithoutExtension(pbo.FullPath);
+                    string destination = Path.Combine(project.FullPath, "source", name);
+                    lastSourceName = name;
+                    ResetSteamDetailProgress(name);
+                    ReportSteamPboProgress(progress, 0d, name + " — iniciando extração");
+                    try
+                    {
+                        await ExtractImportedPbo(project.FullPath, pbo.FullPath, progress, project.Name);
+                        if (Directory.Exists(destination) &&
+                            Directory.EnumerateFileSystemEntries(destination).Any())
+                            extractedSources.Add(destination);
+                        else
+                            failedPbos.Add(Path.GetFileName(pbo.FullPath));
+                    }
+                    catch (Exception ex)
+                    {
+                        failedPbos.Add(Path.GetFileName(pbo.FullPath));
+                        string warning = Path.GetFileName(pbo.FullPath) + ": falha na extração; " + ex.Message;
+                        _steamImportWarnings.Add(warning);
+                        Log(warning, Color.Gold);
+                        DiagnosticLog("Falha isolada na fila de extração: " + ex);
+                    }
+                    finally
+                    {
+                        CompleteSteamPboProgress(progress, name + " concluído");
+                    }
+                }
+
+                if (extractedSources.Count > 0) MoveProjectMetadataToSource(project.FullPath);
+                SetSteamOverallProgress(100, _steamImportWarnings.Count == 0 && failedPbos.Count == 0
+                    ? "Fila de extração concluída"
+                    : "Fila concluída com pendências");
 
                 RefreshProjectContents();
-                SelectSourceByName(name);
-                bool sourceCreated = Directory.Exists(destination) &&
-                    Directory.EnumerateFileSystemEntries(destination).Any();
+                RestorePboSelection(selectedPboPaths, selectedPboTopIndex);
+                if (!string.IsNullOrWhiteSpace(lastSourceName)) SelectSourceByName(lastSourceName);
                 string verifications = _steamImportVerifications.Count == 0
                     ? string.Empty
                     : "\n\nVerificações de integridade:\n✓ " +
@@ -2193,26 +2289,33 @@ namespace DayZModWorkbench
                 string warnings = _steamImportWarnings.Count == 0
                     ? string.Empty
                     : "\n\nAvisos:\n• " + string.Join("\n• ", _steamImportWarnings.ToArray());
-                string message = sourceCreated
-                    ? "PBO processado pelo mesmo fluxo da importação Steam.\n\nSource: " + destination
-                    : "O PBO foi processado, mas não produziu uma source utilizável.";
-                MessageBox.Show(this, message + verifications + warnings,
-                    sourceCreated && _steamImportWarnings.Count == 0
-                        ? "Source extraída e preparada"
-                        : "Extração concluída com pendências",
+                string failures = failedPbos.Count == 0
+                    ? string.Empty
+                    : "\n\nSem source utilizável:\n• " + string.Join("\n• ", failedPbos.ToArray());
+                string message = "Fila processada pelo mesmo fluxo da importação Steam.\n\n" +
+                    "Sources produzidas: " + extractedSources.Count + "/" + pbos.Count;
+                bool completedCleanly = failedPbos.Count == 0 && _steamImportWarnings.Count == 0;
+                MessageBox.Show(this, message + verifications + warnings + failures,
+                    completedCleanly ? "Sources extraídas e preparadas" : "Fila concluída com pendências",
                     MessageBoxButtons.OK,
-                    sourceCreated && _steamImportWarnings.Count == 0
-                        ? MessageBoxIcon.Information
-                        : MessageBoxIcon.Warning);
+                    completedCleanly ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
             }
             catch (Exception ex)
             {
-                ShowError("Falha ao extrair o PBO.", ex);
+                ShowError("Falha ao processar a fila de extração.", ex);
             }
             finally
             {
                 EndSteamImportProgress();
                 SetBusy(false, "Pronto");
+                RestorePboSelection(selectedPboPaths, selectedPboTopIndex);
+                if (!IsDisposed && IsHandleCreated)
+                {
+                    BeginInvoke(new Action(delegate
+                    {
+                        RestorePboSelection(selectedPboPaths, selectedPboTopIndex);
+                    }));
+                }
             }
         }
 
@@ -3171,6 +3274,27 @@ namespace DayZModWorkbench
                     _sourceCombo.SelectedIndex = i;
                     return;
                 }
+            }
+        }
+
+        private void RestorePboSelection(IEnumerable<string> fullPaths, int topIndex)
+        {
+            HashSet<string> selectedPaths = new HashSet<string>(fullPaths, StringComparer.OrdinalIgnoreCase);
+            _pboList.BeginUpdate();
+            try
+            {
+                _pboList.ClearSelected();
+                for (int i = 0; i < _pboList.Items.Count; i++)
+                {
+                    PathItem item = (PathItem)_pboList.Items[i];
+                    if (selectedPaths.Contains(item.FullPath)) _pboList.SetSelected(i, true);
+                }
+                if (_pboList.Items.Count > 0)
+                    _pboList.TopIndex = Math.Max(0, Math.Min(topIndex, _pboList.Items.Count - 1));
+            }
+            finally
+            {
+                _pboList.EndUpdate();
             }
         }
 

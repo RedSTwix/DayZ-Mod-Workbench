@@ -104,4 +104,22 @@ O addon agora reconhece também a família observada em PBO Tools v1.8.1: três 
 No espécime `LS_Set_Redcore.pbo`: 103.717 entradas, 103.630 Cprs válidos, 103.458 decoys de comentário e 86 raízes confiáveis `0..85`, cada uma precedida por três markers. As raízes são exatamente 1 `config.bin`, 27 ODOL/P3D e 58 PAA. Os 27 modelos passam `SEMANTIC-EXACT`; em Windows, o `config.bin` segue para o CfgConvert oficial antes de o Workbench aceitar equivalência integral.
 
 A capability `PBO_TOOLS_V18_MARKER_RECOVERY` passou a ser obrigatória no Workbench 1.7.6, impedindo downgrade automático para um addon que não possua suporte ao layout 1.8.x.
+## Workbench 1.7.7 — auditoria independente contra falso positivo
 
+O Workbench 1.7.7 passa a exigir o addon modular **v8.0.1 ou superior** com a capability `GENERIC_DECOY_FILTER`. A aceitação de uma recuperação de PBO não depende apenas do `Overall: SEMANTIC-EXACT*` produzido pelo Python: o C# lê `PBO_TECHNIQUE_SELECTION.json`, valida a técnica selecionada e exige que técnicas especializadas atinjam pelo menos 0,95 de confidence, mesmo que o threshold declarado pelo addon seja menor. Técnicas marcadas como fallback podem operar com confidence baixa, mas continuam sujeitas a todas as verificações de integridade.
+
+A verificação final exige explicitamente `Recovered decoy leakage: 0` e `Recovered type-mismatch leakage: 0`. A quantidade física de arquivos em `recovered_source` também precisa ser exatamente igual a `Recovered source files`; arquivos extras ou ausentes rejeitam a recuperação. Isso cria uma segunda barreira independente para impedir que resíduos de packer, comentários disfarçados de assets ou extensões falsas sejam promovidos para a source mesmo se uma regressão futura ocorrer no módulo de recuperação.
+
+Este patch atualiza somente o Workbench. O addon v8.0.1 é instalado/atualizado separadamente e não faz parte desta alteração Git.
+
+## Workbench 1.7.8 — RaP Int64 e auditoria pós-preparação
+
+O conversor RaP interno passa a reconhecer o **subtipo 6** como inteiro assinado de 64 bits (`Int64`). Isso permite reconstruir configs DayZ com valores acima do limite de `Int32`, como `hitpoints = 200000000000`, sem deixar `config.bin` binário apenas por causa desse subtipo. O valor é lido em 8 bytes e emitido em decimal com `InvariantCulture`; arrays também herdam o suporte porque usam o mesmo leitor de valores escalares.
+
+A auditoria SHA-1 continua estrita sobre a extração crua. Foi acrescentado um modo separado apenas para o fallback executado **depois** de `SourcePreparer`: nele, somente duas transformações já produzidas e validadas pelo próprio Workbench são aceitas como equivalentes de source — `config.bin` substituído por um `config.cpp` textual válido e remoção de `texHeaders.bin`, que é cache regenerado pelo Addon Builder. Todos os demais payloads continuam obrigados a existir com SHA-1 idêntico, e qualquer outro arquivo extra continua reprovando a auditoria. O relatório diferencia payloads SHA-1 exatos de transformações legítimas em vez de produzir falsos `58/61`.
+
+## Workbench 1.7.9 — avisos RaP somente após auditoria final
+
+Quando o addon Python é usado como recuperação complementar sobre uma extração normal do BankRev, a preparação intermediária da árvore recuperada agora roda em modo de **pré-auditoria**. Arquivos RaP que ainda serão tratados pela etapa ODOL/RVMAT deixam de gerar prematuramente `SOURCE NÃO TOTALMENTE EDITÁVEL`; eles aparecem apenas como pendentes para a recuperação avançada.
+
+A classificação final continua estrita: depois da reconstrução ODOL/RVMAT, o Workbench executa novamente `SourcePreparer` em modo final. Somente se algum RaP realmente permanecer binário nessa auditoria é que o aviso `SOURCE NÃO TOTALMENTE EDITÁVEL` entra no log e no resumo da importação. PBOs realmente protegidos que são entregues diretamente pela recuperação Python continuam recebendo auditoria final imediata, portanto a mudança não mascara perdas reais.
