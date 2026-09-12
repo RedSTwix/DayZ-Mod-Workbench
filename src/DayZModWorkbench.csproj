@@ -37,6 +37,7 @@
     <Compile Include="PboExtractionAuditor.cs" />
     <Compile Include="PrivateKeyStore.cs" />
     <Compile Include="WorkDriveManager.cs" />
+    <Compile Include="WorkDriveJunctionManager.cs" />
     <Compile Include="ModSelectionForm.cs" />
     <Compile Include="MainForm.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
