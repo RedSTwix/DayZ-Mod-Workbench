@@ -84,6 +84,12 @@ Por segurança, o Workbench só remove junctions que constam em seu próprio man
 
 Execute `build.bat`. O Visual Studio já instalado fornece o MSBuild necessário.
 
+## Build e releases no GitHub
+
+O workflow `build-and-release` compila e valida o Workbench no Windows a cada push para `main`, pull request ou execução manual. O resultado fica disponível como artefato da execução por 14 dias.
+
+Tags no formato `v*` também publicam uma release automaticamente. A tag precisa corresponder à versão definida em `src\Properties\AssemblyInfo.cs`. A release recebe o pacote `DayZ-Mod-Workbench-vX.Y.Z.zip`, o arquivo `SHA256SUMS.txt` e um atestado de procedência gerado pelo GitHub.
+
 ## Recuperação de materiais RVMAT
 
 O addon v8 possui duas rotas complementares. Primeiro tenta **recuperação forense RaP** para arquivos que contêm a sequência UTF-8 `EF BF BD`: a árvore RaP é reconstruída ignorando offsets danificados e, quando necessário, valores numéricos de tamanho fixo são invertidos a partir da transformação UTF-8 observada. A recuperação só é aceita se o RaP pré-corrupção reconstruído, submetido novamente à mesma transformação de substituição UTF-8, reproduzir **byte por byte** o payload danificado do PBO. O sidecar `.rvmat.forensic.json` registra SHA-1, método e prova de round-trip.
