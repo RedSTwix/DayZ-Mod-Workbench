@@ -95,6 +95,18 @@ namespace DayZModWorkbench
         private TextBox _backupText;
         private TextBox _launchArgsText;
         private Button _workDriveButton;
+        private TabPage _workDriveTab;
+        private TabPage _settingsTab;
+        private Label _workDriveStatusLabel;
+        private Label _workDriveTargetLabel;
+        private Label _workDriveSummaryLabel;
+        private Button _workDriveMountButton;
+        private Button _workDriveDismountButton;
+        private Button _workDriveSynchronizeButton;
+        private Button _workDriveOpenButton;
+        private Button _workDriveOpenSourceButton;
+        private DataGridView _junctionGrid;
+        private bool _updatingJunctionGrid;
         private string _privateKeyStoreNotice;
         private SplitContainer _projectSplit;
         private int _steamProgressPanelHeight;
@@ -165,9 +177,23 @@ namespace DayZModWorkbench
             RefreshProjects();
             LoadSteamImportMods();
             RefreshWorkDriveButton();
-            Activated += delegate { RefreshWorkDriveButton(); };
-            _tabs.SelectedIndexChanged += delegate { RefreshWorkDriveButton(); };
-            Shown += delegate { ApplyDefaultProjectSplit(); };
+            SynchronizeWorkDriveJunctions(false);
+            Activated += delegate
+            {
+                RefreshWorkDriveButton();
+                if (_tabs != null && _tabs.SelectedTab == _workDriveTab)
+                    RefreshWorkDriveManagement(true);
+            };
+            _tabs.SelectedIndexChanged += delegate
+            {
+                RefreshWorkDriveButton();
+                if (_tabs.SelectedTab == _workDriveTab) RefreshWorkDriveManagement(true);
+            };
+            Shown += delegate
+            {
+                ApplyDefaultProjectSplit();
+                SynchronizeWorkDriveJunctions(false);
+            };
             FormClosing += delegate { SaveWindowPlacement(); };
         }
 
@@ -230,8 +256,11 @@ namespace DayZModWorkbench
             _tabs = new TabControl { Dock = DockStyle.Fill };
             _tabs.TabPages.Add(BuildProjectTab());
             _tabs.TabPages.Add(BuildLaunchTab());
+            _workDriveTab = BuildWorkDriveTab();
+            _tabs.TabPages.Add(_workDriveTab);
             _tabs.TabPages.Add(BuildSteamImportTab());
-            _tabs.TabPages.Add(BuildSettingsTab());
+            _settingsTab = BuildSettingsTab();
+            _tabs.TabPages.Add(_settingsTab);
             root.Controls.Add(_tabs, 0, 1);
 
             root.Controls.Add(BuildSteamProgressPanel(), 0, 2);
@@ -358,7 +387,10 @@ namespace DayZModWorkbench
             _operationControls.Add(_openProjectButton);
 
             Button settings = MakeButton("Configurações", _field);
-            settings.Click += delegate { _tabs.SelectedIndex = 3; };
+            settings.Click += delegate
+            {
+                if (_settingsTab != null) _tabs.SelectedTab = _settingsTab;
+            };
             header.Controls.Add(settings, 5, 0);
             _operationControls.Add(settings);
             return header;
@@ -501,8 +533,15 @@ namespace DayZModWorkbench
             build.SetColumnSpan(verify, 2);
             _operationControls.Add(verify);
 
-            _workDriveButton = MakeButton("Montar P:", Color.FromArgb(155, 90, 230));
-            _workDriveButton.Click += async delegate { await ToggleWorkDrive(); };
+            _workDriveButton = MakeButton("Gerenciar P:", Color.FromArgb(155, 90, 230));
+            _workDriveButton.Click += delegate
+            {
+                if (_workDriveTab != null)
+                {
+                    _tabs.SelectedTab = _workDriveTab;
+                    RefreshWorkDriveManagement(true);
+                }
+            };
             build.Controls.Add(_workDriveButton, 0, 8);
             _operationControls.Add(_workDriveButton);
 
@@ -596,6 +635,495 @@ namespace DayZModWorkbench
             layout.SetColumnSpan(editorInfo, 3);
             page.Controls.Add(layout);
             return page;
+        }
+
+        private TabPage BuildWorkDriveTab()
+        {
+            TabPage page = new TabPage("Drive P");
+            TableLayoutPanel layout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                Padding = new Padding(16),
+                ColumnCount = 1,
+                RowCount = 4
+            };
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 82));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+
+            GroupBox stateGroup = new GroupBox
+            {
+                Text = "WorkDrive do DayZ Tools",
+                Dock = DockStyle.Fill,
+                Padding = new Padding(12)
+            };
+            TableLayoutPanel stateLayout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 2
+            };
+            stateLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
+            stateLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
+            _workDriveStatusLabel = new Label
+            {
+                Text = "Verificando WorkDrive...",
+                Dock = DockStyle.Fill,
+                Font = new Font("Segoe UI Semibold", 10.5f, FontStyle.Bold),
+                ForeColor = _accent,
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+            _workDriveTargetLabel = new Label
+            {
+                Text = string.Empty,
+                Dock = DockStyle.Fill,
+                ForeColor = Color.Silver,
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+            stateLayout.Controls.Add(_workDriveStatusLabel, 0, 0);
+            stateLayout.Controls.Add(_workDriveTargetLabel, 0, 1);
+            stateGroup.Controls.Add(stateLayout);
+            layout.Controls.Add(stateGroup, 0, 0);
+
+            TableLayoutPanel actions = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 6,
+                RowCount = 1,
+                Margin = new Padding(0, 6, 0, 4)
+            };
+            actions.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 125));
+            actions.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 125));
+            actions.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
+            actions.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
+            actions.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
+            actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+
+            _workDriveMountButton = MakeButton("Montar P:", Color.FromArgb(155, 90, 230));
+            _workDriveMountButton.Click += async delegate { await ToggleWorkDrive(); };
+            actions.Controls.Add(_workDriveMountButton, 0, 0);
+
+            _workDriveDismountButton = MakeButton("Desmontar P:", _success);
+            _workDriveDismountButton.Click += async delegate { await ToggleWorkDrive(); };
+            actions.Controls.Add(_workDriveDismountButton, 1, 0);
+
+            _workDriveSynchronizeButton = MakeButton("Sincronizar", _accent);
+            _workDriveSynchronizeButton.Click += delegate { RefreshWorkDriveManagement(true, true); };
+            actions.Controls.Add(_workDriveSynchronizeButton, 2, 0);
+
+            _workDriveOpenButton = MakeButton("Abrir P:", _field);
+            _workDriveOpenButton.Click += delegate { OpenManagedWorkDrive(); };
+            actions.Controls.Add(_workDriveOpenButton, 3, 0);
+
+            _workDriveOpenSourceButton = MakeButton("Abrir source", _field);
+            _workDriveOpenSourceButton.Click += delegate { OpenSelectedJunctionSource(); };
+            actions.Controls.Add(_workDriveOpenSourceButton, 4, 0);
+
+            Label hint = new Label
+            {
+                Text = "Marque uma source para criar P:\\NomeDaSource → projeto\\source\\NomeDaSource.",
+                Dock = DockStyle.Fill,
+                ForeColor = Color.Silver,
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+            actions.Controls.Add(hint, 5, 0);
+            layout.Controls.Add(actions, 0, 1);
+
+            _operationControls.Add(_workDriveMountButton);
+            _operationControls.Add(_workDriveDismountButton);
+            _operationControls.Add(_workDriveSynchronizeButton);
+            _operationControls.Add(_workDriveOpenButton);
+            _operationControls.Add(_workDriveOpenSourceButton);
+
+            _junctionGrid = new DataGridView
+            {
+                Dock = DockStyle.Fill,
+                AllowUserToAddRows = false,
+                AllowUserToDeleteRows = false,
+                AllowUserToResizeRows = false,
+                AutoGenerateColumns = false,
+                BackgroundColor = Color.FromArgb(14, 17, 21),
+                BorderStyle = BorderStyle.FixedSingle,
+                ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize,
+                EnableHeadersVisualStyles = false,
+                MultiSelect = false,
+                ReadOnly = true,
+                RowHeadersVisible = false,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+                EditMode = DataGridViewEditMode.EditProgrammatically
+            };
+            _junctionGrid.ColumnHeadersDefaultCellStyle.BackColor = _field;
+            _junctionGrid.ColumnHeadersDefaultCellStyle.ForeColor = _text;
+            _junctionGrid.DefaultCellStyle.BackColor = _panel;
+            _junctionGrid.DefaultCellStyle.ForeColor = _text;
+            _junctionGrid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(50, 75, 88);
+            _junctionGrid.DefaultCellStyle.SelectionForeColor = Color.White;
+            _junctionGrid.GridColor = Color.FromArgb(55, 60, 68);
+
+            DataGridViewCheckBoxColumn activeColumn = new DataGridViewCheckBoxColumn
+            {
+                Name = "Active",
+                HeaderText = "Ativar",
+                Width = 58,
+                SortMode = DataGridViewColumnSortMode.NotSortable
+            };
+            _junctionGrid.Columns.Add(activeColumn);
+            _junctionGrid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "Source",
+                HeaderText = "Source / prefixo",
+                Width = 180,
+                SortMode = DataGridViewColumnSortMode.NotSortable
+            });
+            _junctionGrid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "Project",
+                HeaderText = "Projeto",
+                Width = 160,
+                SortMode = DataGridViewColumnSortMode.NotSortable
+            });
+            _junctionGrid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "Origin",
+                HeaderText = "Origem",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                FillWeight = 48,
+                SortMode = DataGridViewColumnSortMode.NotSortable
+            });
+            _junctionGrid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "Junction",
+                HeaderText = "Junction",
+                Width = 190,
+                SortMode = DataGridViewColumnSortMode.NotSortable
+            });
+            _junctionGrid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "State",
+                HeaderText = "Estado",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                FillWeight = 32,
+                SortMode = DataGridViewColumnSortMode.NotSortable
+            });
+            _junctionGrid.CellContentClick += delegate(object sender, DataGridViewCellEventArgs e)
+            {
+                if (_updatingJunctionGrid || e.RowIndex < 0 || e.ColumnIndex != 0) return;
+                ToggleJunctionForRow(e.RowIndex);
+            };
+            _junctionGrid.CellDoubleClick += delegate(object sender, DataGridViewCellEventArgs e)
+            {
+                if (e.RowIndex >= 0 && e.ColumnIndex != 0) OpenSelectedJunctionSource();
+            };
+            layout.Controls.Add(_junctionGrid, 0, 2);
+
+            _workDriveSummaryLabel = new Label
+            {
+                Text = "Nenhuma source encontrada.",
+                Dock = DockStyle.Fill,
+                ForeColor = Color.Silver,
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+            layout.Controls.Add(_workDriveSummaryLabel, 0, 3);
+            page.Controls.Add(layout);
+            return page;
+        }
+
+        private WorkDriveState GetConfiguredWorkDriveState()
+        {
+            string configuredDrive = _projectDriveText != null && !string.IsNullOrWhiteSpace(_projectDriveText.Text)
+                ? _projectDriveText.Text.Trim()
+                : _settings.ProjectDrivePath;
+            return WorkDriveManager.GetState(configuredDrive);
+        }
+
+        private bool IsDayZManagedWorkDrive(WorkDriveState state)
+        {
+            if (state == null || !state.IsAvailable) return false;
+            string executable = WorkDriveManager.FindExecutable(_settings.AddonBuilderPath,
+                _settings.BankRevPath, _settings.CfgConvertPath);
+            return WorkDriveManager.IsManagedMapping(executable, state);
+        }
+
+        private WorkDriveState GetJunctionManagementState(WorkDriveState actualState, bool managed)
+        {
+            if (actualState == null) return null;
+            return new WorkDriveState
+            {
+                DriveName = actualState.DriveName,
+                RootPath = actualState.RootPath,
+                TargetPath = actualState.TargetPath,
+                IsSubst = actualState.IsSubst,
+                IsAvailable = actualState.IsAvailable && managed
+            };
+        }
+
+        private void RefreshWorkDriveManagement(bool synchronize, bool logSync = false)
+        {
+            if (_junctionGrid == null) return;
+            try
+            {
+                WorkDriveState state = GetConfiguredWorkDriveState();
+                bool managed = IsDayZManagedWorkDrive(state);
+
+                if (synchronize && managed)
+                    SynchronizeWorkDriveJunctions(logSync);
+
+                WorkDriveState managementState = GetJunctionManagementState(state, managed);
+                List<WorkDriveJunctionViewItem> items = WorkDriveJunctionManager.BuildView(
+                    _settings.BenchPath, managementState);
+
+                if (!state.IsAvailable)
+                {
+                    _workDriveStatusLabel.Text = state.DriveName + " desmontado";
+                    _workDriveStatusLabel.ForeColor = Color.FromArgb(190, 150, 255);
+                    _workDriveTargetLabel.Text = "Monte o WorkDrive para ativar, desativar ou limpar junctions.";
+                }
+                else if (managed)
+                {
+                    _workDriveStatusLabel.Text = state.DriveName + " montado pelo DayZ Tools";
+                    _workDriveStatusLabel.ForeColor = _success;
+                    _workDriveTargetLabel.Text = state.DriveName + " → " + state.TargetPath;
+                }
+                else
+                {
+                    _workDriveStatusLabel.Text = state.DriveName + " está em uso por outra unidade";
+                    _workDriveStatusLabel.ForeColor = Color.DarkOrange;
+                    _workDriveTargetLabel.Text = "Gerenciamento bloqueado por segurança. Destino atual: " + state.TargetPath;
+                }
+
+                ApplyWorkDriveManagementAvailability(state, managed);
+
+                _updatingJunctionGrid = true;
+                try
+                {
+                    _junctionGrid.Rows.Clear();
+                    foreach (WorkDriveJunctionViewItem item in items)
+                    {
+                        int index = _junctionGrid.Rows.Add(item.IsManaged, item.SourceName, item.ProjectName,
+                            item.SourcePath, item.JunctionPath, item.Status);
+                        DataGridViewRow row = _junctionGrid.Rows[index];
+                        row.Tag = item;
+                        row.Cells[0].ToolTipText = item.CanToggle
+                            ? (item.IsManaged ? "Clique para desativar" : "Clique para ativar")
+                            : item.Status;
+                        if (item.IsOrphan)
+                            row.DefaultCellStyle.ForeColor = Color.Gold;
+                        else if (item.IsManaged)
+                            row.DefaultCellStyle.ForeColor = _success;
+                        else if (!item.CanToggle && state.IsAvailable)
+                            row.DefaultCellStyle.ForeColor = Color.FromArgb(235, 170, 100);
+                    }
+                }
+                finally
+                {
+                    _updatingJunctionGrid = false;
+                }
+
+                ApplyJunctionGridVisualState(!_busy && managed);
+
+                int active = items.Count(x => x.IsManaged && !x.IsOrphan);
+                int orphan = items.Count(x => x.IsOrphan);
+                int available = items.Count(x => !x.IsManaged && x.CanToggle);
+                _workDriveSummaryLabel.Text = items.Count + " source(s) listada(s)  •  " + active +
+                    " ativa(s)  •  " + available + " disponível(is)" +
+                    (orphan > 0 ? "  •  " + orphan + " órfã(s)" : string.Empty) +
+                    "  •  manifesto: configs\\workdrive-junctions.json";
+            }
+            catch (Exception ex)
+            {
+                _workDriveStatusLabel.Text = "Não foi possível ler o WorkDrive";
+                _workDriveStatusLabel.ForeColor = Color.DarkOrange;
+                _workDriveTargetLabel.Text = ex.Message;
+                _junctionGrid.Rows.Clear();
+                _workDriveSummaryLabel.Text = "Falha ao atualizar o gerenciamento de junctions.";
+                ApplyWorkDriveManagementAvailability(null, false);
+            }
+        }
+
+        private void ApplyWorkDriveManagementAvailability(WorkDriveState state, bool managed)
+        {
+            bool canMount = !_busy && state != null && !state.IsAvailable;
+            bool canManage = !_busy && managed;
+
+            if (_workDriveMountButton != null) _workDriveMountButton.Enabled = canMount;
+            if (_workDriveDismountButton != null) _workDriveDismountButton.Enabled = canManage;
+            if (_workDriveSynchronizeButton != null) _workDriveSynchronizeButton.Enabled = canManage;
+            if (_workDriveOpenButton != null) _workDriveOpenButton.Enabled = canManage;
+            if (_workDriveOpenSourceButton != null) _workDriveOpenSourceButton.Enabled = canManage;
+            ApplyJunctionGridVisualState(canManage);
+            if (_workDriveSummaryLabel != null)
+            {
+                _workDriveSummaryLabel.Enabled = canManage;
+                _workDriveSummaryLabel.ForeColor = canManage
+                    ? Color.Silver
+                    : Color.FromArgb(105, 110, 118);
+            }
+
+            SetAvailabilityButtonColor(_workDriveMountButton, canMount, Color.FromArgb(155, 90, 230));
+            SetAvailabilityButtonColor(_workDriveDismountButton, canManage, _success);
+            SetAvailabilityButtonColor(_workDriveSynchronizeButton, canManage, _accent);
+            SetAvailabilityButtonColor(_workDriveOpenButton, canManage, _field);
+            SetAvailabilityButtonColor(_workDriveOpenSourceButton, canManage, _field);
+        }
+
+        private void ApplyJunctionGridVisualState(bool enabled)
+        {
+            if (_junctionGrid == null) return;
+
+            Color disabledBackground = Color.FromArgb(31, 35, 42);
+            Color disabledHeader = Color.FromArgb(35, 39, 46);
+            Color disabledText = Color.FromArgb(105, 110, 118);
+            Color headerBackground = enabled ? _field : disabledHeader;
+            Color headerText = enabled ? _text : disabledText;
+
+            if (!enabled)
+            {
+                _junctionGrid.ClearSelection();
+                _junctionGrid.CurrentCell = null;
+            }
+
+            _junctionGrid.Enabled = enabled;
+            _junctionGrid.BackgroundColor = enabled ? Color.FromArgb(14, 17, 21) : disabledBackground;
+            _junctionGrid.GridColor = enabled ? Color.FromArgb(55, 60, 68) : Color.FromArgb(43, 47, 54);
+            _junctionGrid.ColumnHeadersDefaultCellStyle.BackColor = headerBackground;
+            _junctionGrid.ColumnHeadersDefaultCellStyle.ForeColor = headerText;
+            _junctionGrid.ColumnHeadersDefaultCellStyle.SelectionBackColor = headerBackground;
+            _junctionGrid.ColumnHeadersDefaultCellStyle.SelectionForeColor = headerText;
+            _junctionGrid.DefaultCellStyle.BackColor = enabled ? _panel : disabledBackground;
+            _junctionGrid.DefaultCellStyle.ForeColor = enabled ? _text : disabledText;
+            _junctionGrid.DefaultCellStyle.SelectionBackColor = enabled
+                ? Color.FromArgb(50, 75, 88)
+                : disabledBackground;
+            _junctionGrid.DefaultCellStyle.SelectionForeColor = enabled ? Color.White : disabledText;
+
+            foreach (DataGridViewColumn column in _junctionGrid.Columns)
+            {
+                column.HeaderCell.Style.BackColor = headerBackground;
+                column.HeaderCell.Style.ForeColor = headerText;
+                column.HeaderCell.Style.SelectionBackColor = headerBackground;
+                column.HeaderCell.Style.SelectionForeColor = headerText;
+            }
+
+            foreach (DataGridViewRow row in _junctionGrid.Rows)
+            {
+                row.DefaultCellStyle.BackColor = enabled ? _panel : disabledBackground;
+                row.DefaultCellStyle.SelectionBackColor = enabled
+                    ? Color.FromArgb(50, 75, 88)
+                    : disabledBackground;
+                row.DefaultCellStyle.SelectionForeColor = enabled ? Color.White : disabledText;
+                if (!enabled)
+                {
+                    row.DefaultCellStyle.ForeColor = disabledText;
+                    continue;
+                }
+
+                WorkDriveJunctionViewItem item = row.Tag as WorkDriveJunctionViewItem;
+                if (item == null)
+                    row.DefaultCellStyle.ForeColor = _text;
+                else if (item.IsOrphan)
+                    row.DefaultCellStyle.ForeColor = Color.Gold;
+                else if (item.IsManaged)
+                    row.DefaultCellStyle.ForeColor = _success;
+                else if (!item.CanToggle)
+                    row.DefaultCellStyle.ForeColor = Color.FromArgb(235, 170, 100);
+                else
+                    row.DefaultCellStyle.ForeColor = _text;
+            }
+
+            _junctionGrid.Invalidate();
+        }
+
+        private int SynchronizeWorkDriveJunctions(bool logSummary)
+        {
+            try
+            {
+                WorkDriveState state = GetConfiguredWorkDriveState();
+                if (!IsDayZManagedWorkDrive(state)) return 0;
+                int actions = WorkDriveJunctionManager.Synchronize(_settings.BenchPath, state,
+                    delegate(string message) { Log(message, Color.Silver); });
+                if (logSummary)
+                {
+                    if (actions > 0) Log("Sincronização do Drive P concluída: " + actions + " ajuste(s).", _success);
+                    else Log("Sincronização do Drive P concluída: nenhuma alteração necessária.", Color.Silver);
+                }
+                return actions;
+            }
+            catch (Exception ex)
+            {
+                if (logSummary) Log("Falha ao sincronizar junctions: " + ex.Message, Color.Gold);
+                return 0;
+            }
+        }
+
+        private void ToggleJunctionForRow(int rowIndex)
+        {
+            if (rowIndex < 0 || rowIndex >= _junctionGrid.Rows.Count) return;
+            WorkDriveJunctionViewItem item = _junctionGrid.Rows[rowIndex].Tag as WorkDriveJunctionViewItem;
+            if (item == null) return;
+            if (!item.CanToggle)
+            {
+                MessageBox.Show(this, item.Status, "Drive P", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            try
+            {
+                WorkDriveState state = GetConfiguredWorkDriveState();
+                if (!IsDayZManagedWorkDrive(state))
+                    throw new InvalidOperationException("Monte o WorkDrive do DayZ Tools antes de alterar junctions.");
+
+                if (item.IsManaged)
+                {
+                    WorkDriveJunctionManager.Deactivate(item.SourceName, state);
+                    Log("Junction desativada: " + item.JunctionPath, Color.Silver);
+                }
+                else
+                {
+                    WorkDriveJunctionManager.Activate(new WorkDriveSourceEntry
+                    {
+                        ProjectName = item.ProjectName,
+                        SourceName = item.SourceName,
+                        SourcePath = item.SourcePath
+                    }, state);
+                    Log("Junction ativada: " + item.JunctionPath + " → " + item.SourcePath, _success);
+                }
+                RefreshWorkDriveManagement(true);
+            }
+            catch (Exception ex)
+            {
+                ShowError("Não foi possível alterar a junction.", ex);
+                RefreshWorkDriveManagement(false);
+            }
+        }
+
+        private void OpenSelectedJunctionSource()
+        {
+            if (_junctionGrid == null || _junctionGrid.SelectedRows.Count == 0) return;
+            WorkDriveJunctionViewItem item = _junctionGrid.SelectedRows[0].Tag as WorkDriveJunctionViewItem;
+            if (item == null) return;
+            if (!Directory.Exists(item.SourcePath))
+            {
+                MessageBox.Show(this, "A source não existe mais:\n" + item.SourcePath,
+                    "Drive P", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            OpenFolder(item.SourcePath);
+        }
+
+        private void OpenManagedWorkDrive()
+        {
+            try
+            {
+                WorkDriveState state = GetConfiguredWorkDriveState();
+                if (!IsDayZManagedWorkDrive(state))
+                    throw new InvalidOperationException("O WorkDrive do DayZ Tools não está montado.");
+                OpenFolder(state.RootPath);
+            }
+            catch (Exception ex)
+            {
+                ShowError("Não foi possível abrir o WorkDrive.", ex);
+            }
         }
 
         private TabPage BuildSettingsTab()
@@ -2064,6 +2592,7 @@ namespace DayZModWorkbench
             if (_projectCombo.Items.Count > 0) _projectCombo.SelectedIndex = selected >= 0 ? selected : 0;
             UpdateProjectActionAvailability();
             SetStatus(_projectCombo.Items.Count + " projeto(s) encontrado(s)");
+            if (_junctionGrid != null) RefreshWorkDriveManagement(true);
         }
 
         private void SynchronizeProjectConfigurations(IEnumerable<string> projectDirectories)
@@ -2768,41 +3297,36 @@ namespace DayZModWorkbench
             if (_workDriveButton == null) return;
             try
             {
-                string configuredDrive = _projectDriveText != null && !string.IsNullOrWhiteSpace(_projectDriveText.Text)
-                    ? _projectDriveText.Text.Trim()
-                    : _settings.ProjectDrivePath;
-                WorkDriveState state = WorkDriveManager.GetState(configuredDrive);
-                string executable = WorkDriveManager.FindExecutable(_settings.AddonBuilderPath,
-                    _settings.BankRevPath, _settings.CfgConvertPath);
-                bool managed = WorkDriveManager.IsManagedMapping(executable, state);
+                WorkDriveState state = GetConfiguredWorkDriveState();
+                bool managed = IsDayZManagedWorkDrive(state);
+
+                _workDriveButton.Text = "Gerenciar " + state.DriveName;
+                _workDriveButton.Enabled = !_busy;
                 if (!state.IsAvailable)
                 {
-                    _workDriveButton.Text = "Montar " + state.DriveName;
                     _workDriveButton.BackColor = Color.FromArgb(155, 90, 230);
-                    _workDriveButton.Enabled = !_busy;
-                    _workDriveButton.Tag = "WorkDrive desmontado";
+                    _workDriveButton.Tag = "WorkDrive desmontado — clique para abrir o gerenciamento";
                 }
                 else if (managed)
                 {
-                    _workDriveButton.Text = "Desmontar " + state.DriveName;
                     _workDriveButton.BackColor = _success;
-                    _workDriveButton.Enabled = !_busy;
                     _workDriveButton.Tag = state.DriveName + " → " + state.TargetPath;
                 }
                 else
                 {
-                    _workDriveButton.Text = state.DriveName + " em uso";
                     _workDriveButton.BackColor = Color.DarkOrange;
-                    _workDriveButton.Enabled = false;
                     _workDriveButton.Tag = "A letra está ocupada por outra unidade: " + state.TargetPath;
                 }
+
+                ApplyWorkDriveManagementAvailability(state, managed);
             }
             catch (Exception ex)
             {
-                _workDriveButton.Text = "WorkDrive inválido";
+                _workDriveButton.Text = "Gerenciar WorkDrive";
                 _workDriveButton.BackColor = Color.DarkOrange;
-                _workDriveButton.Enabled = false;
+                _workDriveButton.Enabled = !_busy;
                 _workDriveButton.Tag = ex.Message;
+                ApplyWorkDriveManagementAvailability(null, false);
             }
         }
 
@@ -2844,6 +3368,7 @@ namespace DayZModWorkbench
                     : before.DriveName + " desmontado";
                 Log(message, _success);
                 SetStatus(message);
+                if (mount) SynchronizeWorkDriveJunctions(false);
             }
             catch (Exception ex)
             {
@@ -2853,6 +3378,7 @@ namespace DayZModWorkbench
             {
                 SetBusy(false, "Pronto");
                 RefreshWorkDriveButton();
+                RefreshWorkDriveManagement(false);
             }
         }
 
@@ -3033,8 +3559,9 @@ namespace DayZModWorkbench
                 return;
             }
 
-            string profilesRoot = SelectedProject != null ? SelectedProject.FullPath : _settings.BenchPath;
-            string profiles = Path.Combine(profilesRoot, "profiles");
+            string profiles = withEditor
+                ? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "editor files", "profiles")
+                : Path.Combine(SelectedProject != null ? SelectedProject.FullPath : _settings.BenchPath, "profiles");
             Directory.CreateDirectory(profiles);
 
             StringBuilder args = new StringBuilder(_settings.ExtraLaunchArgs ?? string.Empty);

@@ -61,13 +61,24 @@ Nesse fluxo complementar, o Python recupera somente os scripts e o config raiz; 
 
 Ao recompilar uma source reconstruída, o Workbench monta a estrutura do prefixo em uma pasta temporária isolada dentro de `%LocalAppData%\DayZ Mod Workbench` e a passa ao Addon Builder. Assim, os MLOD e o `model.cfg` voltam ao formato de runtime do jogo sem copiar a source para o work drive configurado (`P:\`) nem interferir no conteúdo existente nele. A pasta temporária de cada operação é removida ao terminar.
 
-Na aba **Extrair e compilar**, o botão ao lado de **Verificar assinaturas** controla diretamente o WorkDrive do DayZ Tools. Ele mostra **Montar P:** quando a unidade está ausente e **Desmontar P:** quando o mapeamento configurado pelo DayZ Tools está ativo. Se a letra estiver ocupada por outro disco ou mapeamento, o Workbench não tenta desmontá-la.
+Na aba **Extrair e compilar**, o botão ao lado de **Verificar assinaturas** abre a aba **Drive P**. A montagem/desmontagem do WorkDrive e o gerenciamento das junctions ficam centralizados ali. Se a letra estiver ocupada por outro disco ou mapeamento, o Workbench bloqueia as operações e não tenta desmontá-la nem alterar seu conteúdo.
 
 O WorkDrive do DayZ Tools pode permanecer aguardando uma tecla mesmo depois de concluir a montagem. O Workbench reconhece a confirmação oficial, encerra esse processo auxiliar e libera a interface. Se não houver resposta em 20 segundos, a tentativa é encerrada e o programa orienta a conferir se a Steam está aberta e com o login ativo.
 
 Se um ODOL não for versão 53, 54 ou 55, a reconstrução estiver incompleta ou o relatório indicar erro, o Workbench rejeita a saída reconstruída e preserva o modelo original. Um `config.cpp` vazio ou composto apenas por espaços não impede mais a conversão do `config.bin`. Configs e materiais RaP são lidos por um parser interno com validação estrita de tipos, limites, contagens e offsets; o texto reconstruído é recompilado apenas para validação antes de substituir o original. Assim, um arquivo defeituoso não prende o `CfgConvert`, não faz os demais arquivos serem ignorados e nunca é contado como convertido apenas porque uma ferramenta retornou código zero.
 
 Ao final, a auditoria informa quantos arquivos RaP foram encontrados, convertidos, já possuíam fonte válido ou continuam binários. Quando o payload contém substituições UTF-8 `EF BF BD`, o addon v8 tenta primeiro a recuperação forense. Ele não aceita uma hipótese apenas porque o texto parece plausível: o RaP pré-corrupção reconstruído precisa reproduzir exatamente o payload danificado após a mesma transformação UTF-8 observada. Se essa prova não fechar e também não houver EmbeddedMaterial suficiente, o original é mantido e o resultado continua aparecendo como **SOURCE NÃO TOTALMENTE EDITÁVEL**. `texheaders.bin` é um índice/cache gerado das texturas PAA: o Workbench o ignora na source editável e o Addon Builder o recria no PBO final. O processo não cria `source_backups` nem `binary_backups`; durante uma substituição, usa somente uma pasta transitória para permitir reversão imediata em caso de erro e a remove ao concluir. Texturas PAA e áudios prontos para o jogo permanecem sem alteração. Tanto a reconstrução MLOD quanto a recuperação de scripts ofuscados devem ser validadas no Object Builder/DayZ antes da publicação; elas não equivalem ao projeto-fonte original do autor.
+
+
+## Workbench 1.8.0 — gerenciamento de Drive P e junctions
+
+A aba **Drive P** centraliza o WorkDrive do DayZ Tools e os vínculos das sources da bancada. O botão que antes montava/desmontava o P: diretamente na aba **Extrair e compilar** agora abre esse gerenciamento. Montagem e desmontagem continuam sendo executadas pelo `WorkDrive.exe` oficial do DayZ Tools.
+
+O Workbench descobre automaticamente pastas no formato `edit mod\Projeto\source\NomeDaSource`, mas **não cria junctions automaticamente**. Na aba Drive P, marque explicitamente a source que deseja ativar. A ativação cria `P:\NomeDaSource` como junction para a pasta real da source, sem copiar nem mover arquivos.
+
+Os vínculos criados pelo Workbench são registrados em `configs\workdrive-junctions.json`. A sincronização ocorre ao iniciar, ao abrir a aba, ao atualizar a bancada e após montar o WorkDrive. Se uma source gerenciada for removida da bancada, a junction correspondente é removida na próxima sincronização em que o P: estiver montado. Se a junction desaparecer manualmente, o vínculo deixa de ser considerado ativo.
+
+Por segurança, o Workbench só remove junctions que constam em seu próprio manifesto **e** ainda apontam para o destino registrado. Pastas, junctions ou outros itens existentes no P: que não sejam gerenciados pelo Workbench nunca são substituídos ou apagados. Nomes de source duplicados entre projetos são tratados como conflito, pois ambos tentariam ocupar o mesmo caminho `P:\NomeDaSource`; somente um deles pode ficar ativo por vez.
 
 ## Compilar o programa
 
