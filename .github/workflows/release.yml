@@ -1,0 +1,108 @@
+name: build-and-release
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Validar e compilar (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@v4
+
+      - name: Preparar MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Compilar em modo Release
+        shell: pwsh
+        run: |
+          msbuild src\DayZModWorkbench.csproj /t:Rebuild /p:Configuration=Release /nologo
+
+      - name: Validar versão da tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $assemblyInfo = Get-Content -Raw src\Properties\AssemblyInfo.cs
+          $match = [regex]::Match($assemblyInfo, 'AssemblyVersion\("([0-9]+\.[0-9]+\.[0-9]+)\.0"\)')
+          if (-not $match.Success) {
+            throw "Não foi possível identificar a versão em AssemblyInfo.cs."
+          }
+
+          $version = $match.Groups[1].Value
+          if ($env:GITHUB_REF_NAME -ne "v$version") {
+            throw "A tag $env:GITHUB_REF_NAME não corresponde ao AssemblyInfo.cs ($version)."
+          }
+
+      - name: Preparar artefatos
+        shell: pwsh
+        run: |
+          $assemblyInfo = Get-Content -Raw src\Properties\AssemblyInfo.cs
+          $version = [regex]::Match(
+            $assemblyInfo,
+            'AssemblyVersion\("([0-9]+\.[0-9]+\.[0-9]+)\.0"\)'
+          ).Groups[1].Value
+
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            throw "Não foi possível identificar a versão do Workbench."
+          }
+
+          New-Item -ItemType Directory -Force dist\package | Out-Null
+          Copy-Item bin\DayZModWorkbench.exe dist\package\DayZModWorkbench.exe -Force
+          Copy-Item README.md dist\package\README.md -Force
+
+          $archive = "dist\DayZ-Mod-Workbench-v$version.zip"
+          Compress-Archive -Path dist\package\* -DestinationPath $archive -CompressionLevel Optimal
+
+          $archiveName = Split-Path $archive -Leaf
+          $hash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          "$hash  $archiveName" | Set-Content dist\SHA256SUMS.txt -Encoding ascii
+
+      - name: Armazenar resultado do build
+        uses: actions/upload-artifact@v4
+        with:
+          name: DayZ-Mod-Workbench-windows
+          path: |
+            dist/DayZ-Mod-Workbench-*.zip
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publicar release da tag
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: windows-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+
+    steps:
+      - name: Baixar artefatos validados
+        uses: actions/download-artifact@v4
+        with:
+          name: DayZ-Mod-Workbench-windows
+          path: dist
+
+      - name: Atestar procedência do pacote
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/DayZ-Mod-Workbench-*.zip
+
+      - name: Criar release no GitHub
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/DayZ-Mod-Workbench-*.zip
+            dist/SHA256SUMS.txt
