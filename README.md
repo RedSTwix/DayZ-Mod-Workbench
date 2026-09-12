@@ -1,142 +1,172 @@
 # DayZ Mod Workbench
 
-Aplicativo C# para trabalhar com os projetos armazenados em:
+[![Build](https://github.com/RedSTwix/DayZ-Mod-Workbench/actions/workflows/release.yml/badge.svg)](https://github.com/RedSTwix/DayZ-Mod-Workbench/actions/workflows/release.yml)
+[![Release](https://img.shields.io/github/v/release/RedSTwix/DayZ-Mod-Workbench)](https://github.com/RedSTwix/DayZ-Mod-Workbench/releases/latest)
+[![Licença MIT](https://img.shields.io/badge/licen%C3%A7a-MIT-yellow.svg)](LICENSE)
 
-`C:\Users\<usuario>\Desktop\edit mod`
+Aplicativo gráfico para Windows que reúne os principais fluxos de trabalho com mods do DayZ: importação da Steam, extração e preparação de PBOs, recompilação, assinatura, montagem do WorkDrive e inicialização do DayZ ou do DayZ Editor.
 
-A janela volta a abrir na última posição em que foi fechada. Enquanto ainda não existir esse histórico, ou se a posição salva estiver fora dos monitores atualmente conectados, ela abre centralizada na tela.
+> O Workbench integra ferramentas do DayZ Tools e um addon gerenciado para recuperação de conteúdo. Uma source reconstruída deve ser revisada no Object Builder e testada no DayZ antes de ser publicada.
 
-Os prefixos de compilação de cada projeto são armazenados em `configs\NomeDoProjeto\.dayzworkbench.ini`, junto ao Workbench, sem deixar arquivos de controle dentro da bancada. Configurações antigas encontradas na raiz de um projeto são migradas automaticamente para essa estrutura. Ao abrir o programa ou clicar em **Atualizar**, a pasta `configs` é sincronizada com a bancada e as configurações de projetos que não existem mais são removidas.
+## Recursos principais
 
-A aba **Extrair e compilar** acompanha o conteúdo disponível: com a bancada vazia, os quadros de extração e compilação ficam desativados; em um projeto existente, extrair só é liberado quando há um PBO selecionado e compilar só é liberado quando há uma pasta de source selecionada.
+- **Projetos organizados** — trabalha com projetos dentro de uma bancada configurável, usando as pastas `PBO` e `source`.
+- **Importação da Steam** — localiza mods em `DayZ\!Workshop` e em `steamapps\workshop\content\221100`, exibe o Workshop ID, permite pesquisa e elimina duplicatas.
+- **Extração de PBOs** — processa um ou vários PBOs em fila e mantém falhas isoladas sem interromper os demais itens.
+- **Preparação de sources** — converte configurações e materiais RaP compatíveis para texto e preserva entradas que não passam pelas validações.
+- **Recuperação assistida** — usa o addon Python gerenciado para PBOs protegidos ou ofuscados e para reconstruções ODOL suportadas pelo addon.
+- **Compilação e assinatura** — usa Addon Builder, FileBank e DSSignFile conforme o conteúdo e as opções selecionadas.
+- **Ambiente de teste** — prepara mods em `_test` e inicia o DayZDiag ou o DayZ Editor com os projetos e dependências escolhidos.
+- **Drive P** — monta o WorkDrive e gerencia junctions explícitas entre `P:\NomeDaSource` e as sources da bancada.
+- **Configuração local** — salva caminhos, argumentos de inicialização, posição da janela, configurações por projeto e registros de operação ao lado do aplicativo.
 
-## Fluxo
+## Requisitos
 
-1. Crie uma pasta de projeto, por exemplo `AutoCarFlip`.
-2. Coloque os PBOs em `AutoCarFlip\PBO`.
-3. No programa, selecione o projeto e use **Extrair PBO selecionado → source**.
-4. Essa extração usa o mesmo pipeline de **Copiar + extrair PBOs** da Steam: recuperação pelo addon Python, auditorias, reconstrução ODOL e as duas barras de progresso, aplicadas somente ao PBO selecionado.
-5. O Workbench converte automaticamente `config.bin` para `config.cpp` e materiais RaP para texto.
-6. Edite os arquivos em `AutoCarFlip\source\NomeDoPBO`.
-7. Use **PBO + BISIGN** para gerar o resultado em `AutoCarFlip\PBO`. Todos os sources são binarizados pelo Addon Builder; scripts, layouts e demais arquivos de runtime são incluídos diretamente e conferidos antes da saída ser aceita.
-8. Use **Testar no DayZDiag** ou **Abrir com DayZ Editor**.
+- Windows.
+- Runtime compatível com **.NET Framework 4.7.2**.
+- DayZ instalado para iniciar o jogo ou o DayZDiag.
+- DayZ Tools para BankRev, CfgConvert, Addon Builder, FileBank, DSSignFile e WorkDrive.
+- Python configurado para os fluxos que utilizam o addon de recuperação.
+- Steam aberta e autenticada quando uma operação do WorkDrive depender dela.
 
-Na aba **Importar da Steam**, marque um ou mais mods instalados e escolha:
+O Workbench pode localizar automaticamente instalações do DayZ e do DayZ Tools nas bibliotecas da Steam. Caminhos que não forem detectados podem ser informados na aba **Configurações**.
 
-- **COPIAR PARA BANCADA** para copiar PBOs, BISIGN e metadados;
-- **COPIAR + EXTRAIR PBOS** para também criar `source\NomeDoPBO` para cada PBO extraível e guardar `mod.cpp`/`meta.cpp` diretamente em `source`.
+Para extrair pacotes do addon, o aplicativo procura uma cópia gerenciada, incluída, instalada ou disponível no `PATH`. Se nenhuma instalação do 7-Zip for encontrada, ele baixa o `7zr.exe` 26.02, valida o SHA-256 fixado no código e salva o executável em `tools\7zip\7z.exe`.
 
-Durante a importação, o Workbench expande temporariamente a janela e mantém o painel de progresso fixo entre as abas e o registro das operações até o trabalho terminar. A barra superior mostra o progresso total de todos os PBOs e a cópia é medida pelos bytes transferidos. No modo de cópia e extração, a barra inferior tem o mesmo comprimento, permanece visível e acompanha somente a recuperação/verificação do PBO atual, zerando ao começar o próximo. O Python é iniciado com saída imediata para que cada modelo concluído atualize a verificação em tempo real; depois a barra continua pela validação dos relatórios até 100%. A recuperação interna de payloads não fornece contagens intermediárias ao Workbench e, somente nessa fase, a barra usa animação contínua em vez de exibir um percentual fictício; assim que o resultado retorna, ela volta ao percentual real. Os controles da janela ficam bloqueados durante a operação e todos os botões usam temporariamente o mesmo cinza; ao terminar, suas cores originais são restauradas. Esse acompanhamento é feito inteiramente pelo aplicativo C# e não modifica o addon Python.
+## Instalação
 
-O mesmo painel acompanha a compilação. A barra superior representa o progresso total de um ou de todos os sources; a inferior mostra o source atual passando por cópia, conversão dos configs, binarização, empacotamento, validação e assinatura. Etapas internas do Addon Builder que não informam percentual usam animação contínua até a próxima etapa mensurável.
+1. Acesse a página de [releases](https://github.com/RedSTwix/DayZ-Mod-Workbench/releases/latest).
+2. Baixe o arquivo `DayZ-Mod-Workbench-vX.Y.Z.zip` da versão desejada.
+3. Extraia o conteúdo para uma pasta com permissão de gravação.
+4. Execute `DayZModWorkbench.exe`.
+5. Abra **Configurações**, use **Auto detectar** e confira os caminhos necessários para o seu fluxo.
 
-A lista combina os atalhos de `DayZ\!Workshop` com as instalações em `steamapps\workshop\content\221100`, elimina duplicatas pelo Workshop ID e mostra `Nome do mod │ Workshop ID`. A pesquisa aceita tanto o nome quanto o ID completo ou parcial.
+Os arquivos `settings.ini`, `configs`, `keys`, `addons`, `tools`, `editor files` e `workbench.log` são criados ou mantidos localmente conforme os recursos utilizados.
 
-Cada mod recebe seu próprio projeto em `Desktop\edit mod`. Em operações que incluem extração, `mod.cpp` e `meta.cpp` ficam na raiz da pasta `source`; na cópia sem extração, permanecem na raiz do projeto. Ao preparar `_test`, o Workbench recoloca esses metadados na raiz do mod executável. Chaves públicas e privadas não são copiadas. Se o PBO estiver ofuscado, inclusive por MPG Packer, o Workbench usa o addon Python para reconstruir `config.cpp` e os scripts alcançáveis pelo grafo de includes. O PBO e o BISIGN originais permanecem preservados; se a recuperação não passar nas validações, nenhum source incompleto substitui o existente.
+## Início rápido
 
-Ao escolher **Abrir com DayZ Editor**, o programa mostra duas listas com seleção múltipla:
+A estrutura padrão de um projeto é:
 
-- todos os mods instalados em `DayZ\!Workshop`;
-- todos os projetos disponíveis em `Desktop\edit mod`.
+```text
+edit mod/
+└── MeuProjeto/
+    ├── PBO/
+    └── source/
+```
 
-CF, Dabs Framework, DayZ Editor e o projeto atual começam marcados. Projetos da bancada que possuem PBO compilado são preparados automaticamente na pasta `_test`.
+Fluxo básico:
 
-O modo Editor usa o cliente normal `DayZ_x64.exe`. O botão **Testar no DayZDiag** permanece separado para diagnósticos. Antes de iniciar, o programa detecta instâncias antigas do DayZ e oferece encerrá-las para evitar processos invisíveis.
+1. Crie ou selecione um projeto na bancada.
+2. Coloque os arquivos `.pbo` em `MeuProjeto\PBO` ou importe um mod pela aba **Importar da Steam**.
+3. Selecione um ou mais PBOs e use **Extrair PBO selecionado → source**.
+4. Revise e edite o conteúdo em `MeuProjeto\source\NomeDoPBO`.
+5. Use **PBO + BISIGN** para recompilar e assinar o resultado.
+6. Use **Testar no DayZDiag** ou **Abrir com DayZ Editor** para validar o mod.
 
-Na aba **Configurações**, o botão **Auto detectar** consulta as bibliotecas configuradas na Steam e preenche os caminhos do DayZ, DayZ Tools, Python, Workshop, DayZ Editor, CF e Dabs Framework. O Addon Builder e o work drive do DayZ Tools também podem ser configurados nessa aba. O conversor ODOL aparece como addon gerenciado pelo próprio Workbench. Bancada de mods, chaves públicas e pasta de backups continuam manuais.
+## Importação da Steam
 
-As chaves privadas de assinatura ficam em `keys`, ao lado do executável. Na aba **Extrair e compilar**, o botão **Adicionar** importa uma `.biprivatekey` para essa pasta e passa a selecioná-la para assinatura. A chave configurada em versões anteriores é migrada automaticamente por cópia, sem apagar o arquivo original. A pasta `keys` é ignorada pelo Git e nenhuma chave privada é copiada para projetos, PBOs ou mods de teste.
+A aba **Importar da Steam** oferece dois modos:
 
-## Source editável e limitações
+- **Copiar para bancada** — copia PBOs, assinaturas e metadados para um projeto próprio.
+- **Copiar + extrair PBOs** — além da cópia, prepara uma source para cada PBO extraível.
 
-O BankRev extrai os arquivos armazenados em PBOs não protegidos. Em seguida, o CfgConvert transforma `config.bin` em `config.cpp` e converte RVMAT, BISURF, SQM, FSM, BIKB, EXT, CPP e CFG rapificados para texto. O conversor ODOL configurado reconstrói modelos ODOL53, ODOL54 e ODOL55 como MLOD e recupera `model.cfg` a partir dos dados de esqueleto e animação incorporados. O botão **Desbinarizar source selecionado** aplica o mesmo processo a uma extração antiga.
+A lista combina os atalhos de `DayZ\!Workshop` com o conteúdo direto de `steamapps\workshop\content\221100`. Os mods são identificados pelo nome e, quando disponível, pelo Workshop ID.
 
-O conversor Python é distribuído como **addon modular v8** do Workbench e fica em `addons\deodol_source_windows.py`, com o engine em `addons\deodol_engine`. Antes do primeiro uso de cada execução, o Workbench consulta o `manifest.json` publicado no repositório de atualizações, valida schema, API, versão mínima do Workbench, release, versão do engine e SHA-256 do pacote. Se a versão local for igual ou mais nova, nenhum pacote é baixado. Quando existe uma atualização válida, o pacote criptografado é baixado, validado, extraído em uma área temporária e instalado com rollback automático. Uma falha de rede ou de atualização nunca substitui uma instalação local válida.
+Durante operações com vários arquivos, o painel de progresso separa o andamento geral do processamento do item atual. O registro permanece disponível em `workbench.log`.
 
-Para extrair o pacote criptografado, o Workbench usa primeiro `tools\7zip\7z.exe`. Se ele não existir, procura uma instalação normal do 7-Zip e também o `PATH`. Caso nenhum 7-Zip esteja disponível, o próprio Workbench baixa automaticamente o `7zr.exe` oficial 26.02, valida seu SHA-256 e o salva como `tools\7zip\7z.exe` para reutilização. O arquivo `senha.txt` permanece local, ao lado do executável, e não é versionado pelo Git.
+## Extração e recuperação
 
-Em PBOs ofuscados compatíveis, o mesmo addon lê o arquivo diretamente, valida blocos comprimidos e o SHA-1 do arquivo, expande includes internos e recupera a árvore limpa de scripts. O Workbench exige relatório, manifesto, `config.cpp` ou `config.bin`, pelo menos um arquivo recuperado e zero erros de payload. Quando o BankRev fornece os modelos/texturas normalmente mas deixa um `config.cpp` vazio, o resultado do Python é mesclado à extração completa e o `config.bin` é novamente enviado ao CfgConvert. Includes não resolvidos aparecem como aviso para revisão antes da compilação.
+O fluxo normal utiliza o BankRev para extrair o conteúdo do PBO. Em seguida, o Workbench:
 
-Nesse fluxo complementar, o Python recupera somente os scripts e o config raiz; a source completa resulta da composição com a árvore integral extraída pelo BankRev. Antes da mesclagem, o Workbench compara individualmente o SHA-1 de todos os payloads extraídos com o manifesto produzido diretamente do PBO. Somente depois dessa auditoria converte configs internos e modelos. Relatórios transitórios do conversor são lidos pelo Workbench e não permanecem dentro da source nem entram no PBO recompilado.
+1. converte `config.bin` e arquivos RaP compatíveis com o CfgConvert;
+2. remove apenas caches regeneráveis reconhecidos;
+3. executa auditorias sobre os arquivos extraídos e transformados;
+4. tenta a recuperação complementar pelo addon gerenciado quando necessário;
+5. preserva o PBO, os binários ou a source existente se as validações não forem satisfeitas.
 
-Ao recompilar uma source reconstruída, o Workbench monta a estrutura do prefixo em uma pasta temporária isolada dentro de `%LocalAppData%\DayZ Mod Workbench` e a passa ao Addon Builder. Assim, os MLOD e o `model.cfg` voltam ao formato de runtime do jogo sem copiar a source para o work drive configurado (`P:\`) nem interferir no conteúdo existente nele. A pasta temporária de cada operação é removida ao terminar.
+O addon é instalado em `addons\deodol_source_windows.py`, com seu engine em `addons\deodol_engine`. O provisionador consulta o manifesto do repositório de atualizações, valida compatibilidade e integridade do pacote e mantém uma instalação local válida quando uma atualização falha.
 
-Na aba **Extrair e compilar**, o botão ao lado de **Verificar assinaturas** abre a aba **Drive P**. A montagem/desmontagem do WorkDrive e o gerenciamento das junctions ficam centralizados ali. Se a letra estiver ocupada por outro disco ou mapeamento, o Workbench bloqueia as operações e não tenta desmontá-la nem alterar seu conteúdo.
+### Limitações da reconstrução
 
-O WorkDrive do DayZ Tools pode permanecer aguardando uma tecla mesmo depois de concluir a montagem. O Workbench reconhece a confirmação oficial, encerra esse processo auxiliar e libera a interface. Se não houver resposta em 20 segundos, a tentativa é encerrada e o programa orienta a conferir se a Steam está aberta e com o login ativo.
+- Nem todo PBO protegido ou ofuscado pode ser recuperado.
+- Formatos e versões não reconhecidos permanecem preservados como binários.
+- A reconstrução de modelos, materiais, configurações e scripts não equivale necessariamente ao projeto-fonte original do autor.
+- O resultado deve ser revisado no Object Builder e validado no DayZ antes da distribuição.
 
-Se um ODOL não for versão 53, 54 ou 55, a reconstrução estiver incompleta ou o relatório indicar erro, o Workbench rejeita a saída reconstruída e preserva o modelo original. Um `config.cpp` vazio ou composto apenas por espaços não impede mais a conversão do `config.bin`. Configs e materiais RaP são lidos por um parser interno com validação estrita de tipos, limites, contagens e offsets; o texto reconstruído é recompilado apenas para validação antes de substituir o original. Assim, um arquivo defeituoso não prende o `CfgConvert`, não faz os demais arquivos serem ignorados e nunca é contado como convertido apenas porque uma ferramenta retornou código zero.
+## Compilação e assinatura
 
-Ao final, a auditoria informa quantos arquivos RaP foram encontrados, convertidos, já possuíam fonte válido ou continuam binários. Quando o payload contém substituições UTF-8 `EF BF BD`, o addon v8 tenta primeiro a recuperação forense. Ele não aceita uma hipótese apenas porque o texto parece plausível: o RaP pré-corrupção reconstruído precisa reproduzir exatamente o payload danificado após a mesma transformação UTF-8 observada. Se essa prova não fechar e também não houver EmbeddedMaterial suficiente, o original é mantido e o resultado continua aparecendo como **SOURCE NÃO TOTALMENTE EDITÁVEL**. `texheaders.bin` é um índice/cache gerado das texturas PAA: o Workbench o ignora na source editável e o Addon Builder o recria no PBO final. O processo não cria `source_backups` nem `binary_backups`; durante uma substituição, usa somente uma pasta transitória para permitir reversão imediata em caso de erro e a remove ao concluir. Texturas PAA e áudios prontos para o jogo permanecem sem alteração. Tanto a reconstrução MLOD quanto a recuperação de scripts ofuscados devem ser validadas no Object Builder/DayZ antes da publicação; elas não equivalem ao projeto-fonte original do autor.
+O Workbench monta um projeto temporário em `%LocalAppData%\DayZ Mod Workbench`, executa a ferramenta de compilação apropriada e verifica se o PBO gerado contém as entradas esperadas.
 
+As chaves privadas importadas são armazenadas em `keys`, ao lado do executável. O aplicativo usa a chave local para assinar o resultado, mas não a copia para projetos, PBOs ou mods de teste. Arquivos `.biprivatekey` são ignorados pelo Git.
 
-## Workbench 1.8.0 — gerenciamento de Drive P e junctions
+## DayZ, DayZDiag e DayZ Editor
 
-A aba **Drive P** centraliza o WorkDrive do DayZ Tools e os vínculos das sources da bancada. O botão que antes montava/desmontava o P: diretamente na aba **Extrair e compilar** agora abre esse gerenciamento. Montagem e desmontagem continuam sendo executadas pelo `WorkDrive.exe` oficial do DayZ Tools.
+- **Testar no DayZDiag** inicia `DayZDiag_x64.exe` com os argumentos configurados.
+- **Abrir com DayZ Editor** permite selecionar mods instalados e projetos da bancada antes de iniciar `DayZ_x64.exe`.
+- Projetos com PBO compilado podem ser preparados automaticamente na pasta `_test`.
+- Os perfis usados pelo DayZ Editor ficam em `editor files\profiles` na pasta do Workbench.
 
-O Workbench descobre automaticamente pastas no formato `edit mod\Projeto\source\NomeDaSource`, mas **não cria junctions automaticamente**. Na aba Drive P, marque explicitamente a source que deseja ativar. A ativação cria `P:\NomeDaSource` como junction para a pasta real da source, sem copiar nem mover arquivos.
+Antes da inicialização, o aplicativo verifica processos antigos do DayZ e pode oferecer o encerramento dessas instâncias.
 
-Os vínculos criados pelo Workbench são registrados em `configs\workdrive-junctions.json`. A sincronização ocorre ao iniciar, ao abrir a aba, ao atualizar a bancada e após montar o WorkDrive. Se uma source gerenciada for removida da bancada, a junction correspondente é removida na próxima sincronização em que o P: estiver montado. Se a junction desaparecer manualmente, o vínculo deixa de ser considerado ativo.
+## Drive P e junctions
 
-Por segurança, o Workbench só remove junctions que constam em seu próprio manifesto **e** ainda apontam para o destino registrado. Pastas, junctions ou outros itens existentes no P: que não sejam gerenciados pelo Workbench nunca são substituídos ou apagados. Nomes de source duplicados entre projetos são tratados como conflito, pois ambos tentariam ocupar o mesmo caminho `P:\NomeDaSource`; somente um deles pode ficar ativo por vez.
+A aba **Drive P** centraliza a montagem do WorkDrive e os vínculos das sources.
 
-## Compilar o programa
+- A ativação é sempre explícita; nenhuma junction é criada automaticamente.
+- Cada vínculo usa o formato `P:\NomeDaSource` e aponta para a pasta original da source.
+- Os registros ficam em `configs\workdrive-junctions.json`.
+- A sincronização ocorre ao iniciar o aplicativo, abrir a aba, atualizar a bancada e montar o WorkDrive.
+- Entradas não gerenciadas ou com destino divergente são preservadas.
+- Sources com o mesmo nome são tratadas como conflito, pois disputariam o mesmo caminho no drive.
 
-Execute `build.bat`. O Visual Studio já instalado fornece o MSBuild necessário.
+Se a letra configurada estiver ocupada por outro disco ou mapeamento, o Workbench bloqueia o gerenciamento e não altera o conteúdo existente.
 
-## Build e releases no GitHub
+## Configuração e dados locais
 
-O workflow `build-and-release` compila e valida o Workbench no Windows a cada push para `main`, pull request ou execução manual. O resultado fica disponível como artefato da execução por 14 dias.
+| Caminho | Finalidade |
+|---|---|
+| `settings.ini` | Caminhos das ferramentas, argumentos de inicialização e posição da janela |
+| `configs\NomeDoProjeto\.dayzworkbench.ini` | Prefixo de compilação de cada projeto |
+| `configs\workdrive-junctions.json` | Junctions gerenciadas no WorkDrive |
+| `keys\` | Chaves privadas importadas localmente |
+| `addons\` | Script e engine do addon gerenciado |
+| `tools\7zip\` | Cópia gerenciada do 7-Zip, quando provisionada |
+| `editor files\profiles\` | Perfis usados pelo DayZ Editor |
+| `workbench.log` | Registro persistente das operações e diagnósticos |
 
-Tags no formato `v*` também publicam uma release automaticamente. A tag precisa corresponder à versão definida em `src\Properties\AssemblyInfo.cs`. A release recebe o pacote `DayZ-Mod-Workbench-vX.Y.Z.zip`, o arquivo `SHA256SUMS.txt` e um atestado de procedência gerado pelo GitHub.
+A bancada padrão é `Desktop\edit mod`, mas pode ser alterada. Os caminhos detectados automaticamente devem ser revisados quando a Steam, o DayZ ou o DayZ Tools estiverem instalados em bibliotecas diferentes.
 
-## Recuperação de materiais RVMAT
+## Compilar o projeto
 
-O addon v8 possui duas rotas complementares. Primeiro tenta **recuperação forense RaP** para arquivos que contêm a sequência UTF-8 `EF BF BD`: a árvore RaP é reconstruída ignorando offsets danificados e, quando necessário, valores numéricos de tamanho fixo são invertidos a partir da transformação UTF-8 observada. A recuperação só é aceita se o RaP pré-corrupção reconstruído, submetido novamente à mesma transformação de substituição UTF-8, reproduzir **byte por byte** o payload danificado do PBO. O sidecar `.rvmat.forensic.json` registra SHA-1, método e prova de round-trip.
+O projeto utiliza C# com Windows Forms e tem como alvo o .NET Framework 4.7.2.
 
-Se a prova forense não fechar, o addon usa a rota baseada em `EmbeddedMaterial`: lê `EmbeddedMaterial` dos P3D ODOL e reconstrói o RVMAT quando o mapeamento compilado é unívoco, preservando um `.rvmat.embedded.json`. Ao final o Workbench executa novamente a auditoria RaP com `CfgConvert`; somente arquivos realmente convertidos deixam de aparecer como pendência.
+Com o MSBuild disponível em um dos caminhos reconhecidos pelo script, execute:
 
+```bat
+build.bat
+```
 
-## v7 final — SOURCE-PROOF
+O script recompila `src\DayZModWorkbench.csproj` em modo Release e copia `DayZModWorkbench.exe` para a raiz do repositório.
 
-A recuperação de RVMAT agora combina a topologia RaP danificada sobrevivente com os valores compilados do ODOL EmbeddedMaterial. O RaP é a autoridade para ordem de classes/propriedades, gaps de Stage, presença/ausência de uvTransform e casing de strings. EmbeddedMaterial completa os valores semânticos perdidos.
+O workflow [`build-and-release`](.github/workflows/release.yml) também compila o projeto no Windows em pushes para `main`, pull requests e execuções manuais. Tags `v*` compatíveis com a versão do assembly podem publicar uma release com pacote, checksum e atestado de procedência.
 
-Uma recuperação híbrida só recebe o estado SOURCE-PROOF quando o RaP pré-corrupção reconstruído, submetido à mesma transformação UTF-8 que produziu EF BF BD, reproduz byte por byte o payload danificado. No corpus SharpAxe_Bots_Extra validado contra a source real: 4 RVMATs por inversão forense direta + 23 por RaP+EmbeddedMaterial SOURCE-PROOF = 27/27, com 0 materiais apenas semânticos.
-## v7.1.3 — fallback automático de config.bin e log persistente
+## Estrutura do repositório
 
-Quando o BankRev extrai `config.bin` mas não produz um `config.cpp` textual utilizável (ausente, vazio ou inválido), o Workbench agora aciona automaticamente o addon Python v7 SOURCE-PROOF antes de declarar a source incompleta. Se o caso só for percebido pela pré-auditoria RaP, existe uma segunda tentativa automática pelo Python. Se o Python não resolver, o conversor RaP interno ainda é tentado e o `config.bin` original permanece preservado; a pendência só é exibida se todas as rotas falharem.
+```text
+DayZ-Mod-Workbench/
+├── .github/workflows/release.yml  # Build e publicação de releases
+├── src/                           # Aplicação Windows Forms e integrações
+├── build.bat                      # Build local com MSBuild
+├── README.md                      # Documentação do projeto
+└── LICENSE                        # Licença MIT
+```
 
-O painel **Registro das operações** também passou a ser persistente: todas as linhas exibidas na interface são gravadas em `workbench.log` na pasta do executável, com data/hora e categoria `[OP]`. Diagnósticos internos usam `[DIAG]`. Assim uma importação que apresente pendência pode ser analisada posteriormente mesmo depois de fechar o Workbench.
+## Releases
 
+Versões publicadas, pacotes e notas de alteração estão disponíveis na página de [releases](https://github.com/RedSTwix/DayZ-Mod-Workbench/releases).
 
-## Workbench 1.7.5 — PBO Tools marker recovery
+O arquivo `SHA256SUMS.txt`, quando anexado pela automação de release, permite conferir a integridade do pacote distribuído.
 
-O addon Python detecta genericamente PBOs do PBO Tools que preservem a sequência `deobfuscated_fileN.<ext>`. A entrada imediatamente seguinte é tratada como raiz confiável; para scripts, o caminho embaralhado é usado apenas para localizar o módulo DayZ e resolver/expandir o include graph. Decoys com GUIDs, extensões falsas, caracteres invisíveis e caminhos complexos ficam fora da source recuperada. O verificador mantém SHA-1/Cprs do arquivo inteiro e restringe validação semântica de assets aos alvos marcados, evitando falsos P3D criados por extensões-decoy.
+## Licença
 
-O Workbench exige agora `PBO_TOOLS_MARKER_RECOVERY` e `PBO_FULL_PAYLOAD_RECOVERY` no addon, impedindo downgrade automático para uma revisão do addon que ainda não possua essas técnicas.
-## Workbench 1.7.6 — PBO Tools 1.8.x marker-run recovery
-
-O addon agora reconhece também a família observada em PBO Tools v1.8.1: três (ou mais, sem número fixo codificado) entradas consecutivas `deobfuscated_fileN` sem extensão funcionam como registros de controle; o primeiro arquivo não-marker imediatamente após o run é a raiz confiável. A sequência precisa ser numerada de forma contígua a partir de zero e é validada contra o banner/propriedades do PBO quando disponíveis. Isso evita selecionar milhares de decoys com extensões falsas.
-
-No espécime `LS_Set_Redcore.pbo`: 103.717 entradas, 103.630 Cprs válidos, 103.458 decoys de comentário e 86 raízes confiáveis `0..85`, cada uma precedida por três markers. As raízes são exatamente 1 `config.bin`, 27 ODOL/P3D e 58 PAA. Os 27 modelos passam `SEMANTIC-EXACT`; em Windows, o `config.bin` segue para o CfgConvert oficial antes de o Workbench aceitar equivalência integral.
-
-A capability `PBO_TOOLS_V18_MARKER_RECOVERY` passou a ser obrigatória no Workbench 1.7.6, impedindo downgrade automático para um addon que não possua suporte ao layout 1.8.x.
-## Workbench 1.7.7 — auditoria independente contra falso positivo
-
-O Workbench 1.7.7 passa a exigir o addon modular **v8.0.1 ou superior** com a capability `GENERIC_DECOY_FILTER`. A aceitação de uma recuperação de PBO não depende apenas do `Overall: SEMANTIC-EXACT*` produzido pelo Python: o C# lê `PBO_TECHNIQUE_SELECTION.json`, valida a técnica selecionada e exige que técnicas especializadas atinjam pelo menos 0,95 de confidence, mesmo que o threshold declarado pelo addon seja menor. Técnicas marcadas como fallback podem operar com confidence baixa, mas continuam sujeitas a todas as verificações de integridade.
-
-A verificação final exige explicitamente `Recovered decoy leakage: 0` e `Recovered type-mismatch leakage: 0`. A quantidade física de arquivos em `recovered_source` também precisa ser exatamente igual a `Recovered source files`; arquivos extras ou ausentes rejeitam a recuperação. Isso cria uma segunda barreira independente para impedir que resíduos de packer, comentários disfarçados de assets ou extensões falsas sejam promovidos para a source mesmo se uma regressão futura ocorrer no módulo de recuperação.
-
-Este patch atualiza somente o Workbench. O addon v8.0.1 é instalado/atualizado separadamente e não faz parte desta alteração Git.
-
-## Workbench 1.7.8 — RaP Int64 e auditoria pós-preparação
-
-O conversor RaP interno passa a reconhecer o **subtipo 6** como inteiro assinado de 64 bits (`Int64`). Isso permite reconstruir configs DayZ com valores acima do limite de `Int32`, como `hitpoints = 200000000000`, sem deixar `config.bin` binário apenas por causa desse subtipo. O valor é lido em 8 bytes e emitido em decimal com `InvariantCulture`; arrays também herdam o suporte porque usam o mesmo leitor de valores escalares.
-
-A auditoria SHA-1 continua estrita sobre a extração crua. Foi acrescentado um modo separado apenas para o fallback executado **depois** de `SourcePreparer`: nele, somente duas transformações já produzidas e validadas pelo próprio Workbench são aceitas como equivalentes de source — `config.bin` substituído por um `config.cpp` textual válido e remoção de `texHeaders.bin`, que é cache regenerado pelo Addon Builder. Todos os demais payloads continuam obrigados a existir com SHA-1 idêntico, e qualquer outro arquivo extra continua reprovando a auditoria. O relatório diferencia payloads SHA-1 exatos de transformações legítimas em vez de produzir falsos `58/61`.
-
-## Workbench 1.7.9 — avisos RaP somente após auditoria final
-
-Quando o addon Python é usado como recuperação complementar sobre uma extração normal do BankRev, a preparação intermediária da árvore recuperada agora roda em modo de **pré-auditoria**. Arquivos RaP que ainda serão tratados pela etapa ODOL/RVMAT deixam de gerar prematuramente `SOURCE NÃO TOTALMENTE EDITÁVEL`; eles aparecem apenas como pendentes para a recuperação avançada.
-
-A classificação final continua estrita: depois da reconstrução ODOL/RVMAT, o Workbench executa novamente `SourcePreparer` em modo final. Somente se algum RaP realmente permanecer binário nessa auditoria é que o aviso `SOURCE NÃO TOTALMENTE EDITÁVEL` entra no log e no resumo da importação. PBOs realmente protegidos que são entregues diretamente pela recuperação Python continuam recebendo auditoria final imediata, portanto a mudança não mascara perdas reais.
+Este projeto é distribuído sob a [licença MIT](LICENSE).

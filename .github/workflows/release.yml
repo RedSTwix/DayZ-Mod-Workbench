@@ -59,6 +59,7 @@ jobs:
           New-Item -ItemType Directory -Force dist\package | Out-Null
           Copy-Item bin\DayZModWorkbench.exe dist\package\DayZModWorkbench.exe -Force
           Copy-Item README.md dist\package\README.md -Force
+          Copy-Item LICENSE dist\package\LICENSE -Force
 
           $archive = "dist\DayZ-Mod-Workbench-v$version.zip"
           Compress-Archive -Path dist\package\* -DestinationPath $archive -CompressionLevel Optimal
