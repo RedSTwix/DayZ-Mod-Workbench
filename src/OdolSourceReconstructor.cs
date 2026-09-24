@@ -117,11 +117,11 @@ namespace DayZModWorkbench
                             "verificando " + relative);
                     string verificationPath = Path.Combine(outputRoot, relative + ".verification.txt");
                     if (!File.Exists(verificationPath))
-                        throw new InvalidOperationException("O v7 não gerou a verificação do modelo: " + relative);
+                        throw new InvalidOperationException("O addon Python não gerou a verificação do modelo: " + relative);
                     string expected = ReadSignature(sourceModel) == "ODOL" ? "SEMANTIC-EXACT" : "STRUCTURAL-EXACT";
                     string actual = ReadReportText(File.ReadAllText(verificationPath), "Result");
                     if (!actual.Equals(expected, StringComparison.OrdinalIgnoreCase))
-                        throw new InvalidOperationException("Verificação v7 de " + relative + ": esperado " +
+                        throw new InvalidOperationException("Verificação do addon Python para " + relative + ": esperado " +
                             expected + ", recebido " + actual + ".");
                     File.Delete(verificationPath);
                     verificationIndex++;
@@ -178,7 +178,7 @@ namespace DayZModWorkbench
         {
             Match match = Regex.Match(report, "^" + Regex.Escape(label) + @"\s*:\s*(.*?)\s*$",
                 RegexOptions.IgnoreCase | RegexOptions.Multiline);
-            if (!match.Success) throw new InvalidOperationException("Campo ausente no relatório ODOL v7: " + label);
+            if (!match.Success) throw new InvalidOperationException("Campo ausente no relatório ODOL do addon: " + label);
             return match.Groups[1].Value.Trim();
         }
 

@@ -5,6 +5,7 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -1846,14 +1847,14 @@ namespace DayZModWorkbench
             {
                 if (reconstruction.SourceProofRvmats > 0 || reconstruction.SemanticOnlyRvmats > 0)
                 {
-                    Log("RVMAT v7 final: " + reconstruction.RecoveredRvmats + " material(is) reconstruído(s) — " +
+                    Log("RVMAT addon Python final: " + reconstruction.RecoveredRvmats + " material(is) reconstruído(s) — " +
                         reconstruction.ForensicRvmats + " por RaP forense direto, " +
                         reconstruction.SourceProofRvmats + " por RaP+EmbeddedMaterial com prova byte-a-byte e " +
                         reconstruction.SemanticOnlyRvmats + " somente semântico(s); executando auditoria final da source...", _accent);
                 }
                 else
                 {
-                    Log("RVMAT v7: " + reconstruction.RecoveredRvmats + " material(is) reconstruído(s) — " +
+                    Log("RVMAT addon Python: " + reconstruction.RecoveredRvmats + " material(is) reconstruído(s) — " +
                         reconstruction.ForensicRvmats + " por RaP forense e " + reconstruction.EmbeddedRvmats +
                         " por EmbeddedMaterial; executando auditoria final da source...", _accent);
                 }
@@ -1861,12 +1862,12 @@ namespace DayZModWorkbench
             else
             {
                 Log("Auditoria final da source: verificando " + initial.BinaryFilesPreserved +
-                    " arquivo(s) RaP que permaneceram pendentes após a tentativa de recuperação v7...", _accent);
+                    " arquivo(s) RaP que permaneceram pendentes após a tentativa de recuperação pelo addon Python...", _accent);
             }
 
             SourcePreparationResult finalResult = await SourcePreparer.PrepareAsync(preparedRoot,
                 _settings.CfgConvertPath, LogLine);
-            Log("Auditoria final após recuperação RVMAT v7: " + finalResult.Summary,
+            Log("Auditoria final após recuperação RVMAT addon Python: " + finalResult.Summary,
                 finalResult.IsComplete && finalResult.Warnings.Count == 0 ? _success : Color.Gold);
             return finalResult;
         }
@@ -1885,22 +1886,89 @@ namespace DayZModWorkbench
             string tempRoot = Program.CreateTemporaryPath("SteamImport");
             ReportSteamPboProgress(progress, 0.28d, progressName + " — propriedades lidas");
 
-            if (IsProtectedPbo(properties.Output))
+            // Decide the extraction engine before BankRev -f.  The Python addon performs a
+            // generic PBO preflight based on registered recovery techniques and Win32 path
+            // semantics; no mod/file name is used in this routing decision.
+            PboPreflightProbeResult preflight = null;
+            if (File.Exists(_settings.PythonPath) && File.Exists(_settings.OdolConverterPath))
+            {
+                try
+                {
+                    preflight = await PboSourceReconstructor.ProbeAsync(
+                        pbo, _settings.PythonPath, _settings.OdolConverterPath);
+                }
+                catch (Exception ex)
+                {
+                    // Preflight is an optimization/safety router.  If it is unavailable, keep
+                    // the legacy property detector and BankRev path rather than blocking an
+                    // otherwise ordinary PBO import.
+                    Log(pboName + ": pré-análise estrutural do PBO indisponível; mantendo fluxo compatível. " +
+                        ex.Message, Color.Gold);
+                }
+            }
+
+            bool propertyProtected = IsProtectedPbo(properties.Output);
+            bool preflightProtected = preflight != null && preflight.prefer_python;
+            if (preflightProtected || propertyProtected)
             {
                 Directory.CreateDirectory(tempRoot);
                 try
                 {
-                    Log(pboName + ": ofuscação detectada; iniciando recuperação pelo addon Python.", _accent);
+                    if (preflightProtected)
+                        Log(pboName + ": pré-análise estrutural selecionou recuperação Python antes do BankRev -f — " +
+                            preflight.Summary + ".", _accent);
+                    else
+                        Log(pboName + ": ofuscação indicada pelas propriedades do PBO; iniciando recuperação pelo addon Python.", _accent);
                     ReportSteamPboProgress(progress, 0.35d, progressName + " — recuperação protegida");
                     PboSourceRecoveryResult recovery = await RecoverProtectedPbo(pbo, tempRoot, progress, pboName);
                     if (!string.IsNullOrWhiteSpace(recovery.Prefix)) prefix = recovery.Prefix;
+
+                    string recoveredPreparedRoot = recovery.SourceRoot;
+                    OdolReconstructionResult directReconstruction = null;
+                    try
+                    {
+                        string converterPath = await EnsureOdolConverterAvailable();
+                        directReconstruction = await OdolSourceReconstructor.ReconstructAsync(
+                            recovery.SourceRoot, _settings.PythonPath, converterPath, LogLine);
+                        if (directReconstruction.Changed)
+                        {
+                            recoveredPreparedRoot = directReconstruction.OutputRoot;
+                            Log("Reconstrução de modelos após recuperação Python direta: " + pboName + " — " +
+                                directReconstruction.Summary, _success);
+                        }
+                        foreach (string item in directReconstruction.Warnings)
+                        {
+                            string warning = pboName + ": " + item;
+                            _steamImportWarnings.Add(warning);
+                            Log(warning, Color.Gold);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        string warning = pboName + ": P3D recuperado, mas a reconstrução ODOL→MLOD não pôde ser concluída; " +
+                            "o original foi preservado. " + ex.Message;
+                        _steamImportWarnings.Add(warning);
+                        Log(warning, Color.Gold);
+                    }
+
+                    SourcePreparationResult directFinalPreparation = await SourcePreparer.PrepareAsync(
+                        recoveredPreparedRoot, _settings.CfgConvertPath, LogLine, false);
+                    foreach (string item in directFinalPreparation.Warnings)
+                    {
+                        string warning = pboName + ": " + item;
+                        _steamImportWarnings.Add(warning);
+                        Log(warning, Color.Gold);
+                    }
+
                     string sourceRoot = Path.Combine(projectRoot, "source");
                     string destination = Path.Combine(sourceRoot, pboName);
                     ReportSteamPboProgress(progress, 0.92d, progressName + " — gravando source recuperada");
-                    await Task.Run(delegate { ReplaceDirectoryByCopy(recovery.SourceRoot, destination); });
+                    await Task.Run(delegate { ReplaceDirectoryByCopy(recoveredPreparedRoot, destination); });
                     SaveProjectPrefix(projectRoot, pboName, prefix);
                     ReportSteamPboProgress(progress, 0.98d, progressName + " — source recuperada");
-                    Log("PBO ofuscado recuperado: " + pboName + " → " + destination + " — " + recovery.Summary, _success);
+                    Log("PBO recuperado diretamente pelo addon Python: " + pboName + " → " + destination + " — " +
+                        recovery.Summary + " | " + directFinalPreparation.Summary,
+                        directFinalPreparation.IsComplete && directFinalPreparation.Warnings.Count == 0 ? _success : Color.Gold);
                     foreach (string item in recovery.Warnings)
                     {
                         string warning = pboName + ": " + item;
@@ -1931,26 +1999,76 @@ namespace DayZModWorkbench
                 ProcessResult result = await ProcessRunner.RunAsync(_settings.BankRevPath,
                     "-f " + ProcessRunner.Quote(tempRoot) + " -t " + ProcessRunner.Quote(pbo), projectRoot, LogLine);
 
-                string extractedRoot = FindExtractedRoot(tempRoot, prefix, pboName);
                 bool bankRevProtected = IsProtectedPbo(result.Output);
                 bool bankRevFailed = result.ExitCode != 0;
+                bool bankRevUnsafe = HasUnsafeBankRevExtraction(result.Output);
+                // Never enumerate a BankRev tree after Windows path/device-name failures.
+                // Protected/obfuscated PBOs can emit reserved device names, wildcards or
+                // otherwise invalid Win32 paths; never walk such a partial extraction tree.
+                string extractedRoot = null;
+                if (!bankRevProtected && !bankRevFailed && !bankRevUnsafe)
+                    extractedRoot = FindExtractedRoot(tempRoot, prefix, pboName);
                 bool extractionEmpty = extractedRoot == null ||
                     !Directory.EnumerateFiles(extractedRoot, "*", SearchOption.AllDirectories).Any();
-                if (bankRevProtected || bankRevFailed || extractionEmpty)
+                if (bankRevProtected || bankRevFailed || bankRevUnsafe || extractionEmpty)
                 {
                     string reason = bankRevProtected ? "BankRev informou PBO protegido/ofuscado" :
+                        bankRevUnsafe ? "BankRev encontrou caminhos inválidos/armadilhas de proteção" :
                         bankRevFailed ? "BankRev falhou com código " + result.ExitCode :
                         "BankRev não produziu arquivos utilizáveis";
-                    Log(pboName + ": " + reason + "; tentando addon Python v7.", _accent);
+                    Log(pboName + ": " + reason + "; usando recuperação especializada do addon Python v8+.", _accent);
                     try
                     {
                         PboSourceRecoveryResult recovery = await RecoverProtectedPbo(pbo, tempRoot, progress, pboName);
                         if (!string.IsNullOrWhiteSpace(recovery.Prefix)) prefix = recovery.Prefix;
+
+                        // A recuperação de PBO prova quais payloads pertencem à source, mas um P3D
+                        // legítimo ainda pode estar em ODOL. Execute a mesma reconstrução ODOL usada
+                        // pelo fluxo BankRev antes de gravar a source final, inclusive para PBOs
+                        // protegidos que desviaram diretamente para o Python.
+                        string recoveredPreparedRoot = recovery.SourceRoot;
+                        try
+                        {
+                            string converterPath = await EnsureOdolConverterAvailable();
+                            OdolReconstructionResult protectedReconstruction = await OdolSourceReconstructor.ReconstructAsync(
+                                recovery.SourceRoot, _settings.PythonPath, converterPath, LogLine);
+                            if (protectedReconstruction.Changed)
+                            {
+                                recoveredPreparedRoot = protectedReconstruction.OutputRoot;
+                                Log("Reconstrução de modelos após recuperação protegida: " + pboName + " — " +
+                                    protectedReconstruction.Summary, _success);
+                            }
+                            foreach (string item in protectedReconstruction.Warnings)
+                            {
+                                string warning = pboName + ": " + item;
+                                _steamImportWarnings.Add(warning);
+                                Log(warning, Color.Gold);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            string warning = pboName + ": ODOL recuperado, mas não reconstruído como MLOD; " +
+                                "o P3D original foi preservado. " + ex.Message;
+                            _steamImportWarnings.Add(warning);
+                            Log(warning, Color.Gold);
+                        }
+
+                        SourcePreparationResult protectedFinalPreparation = await SourcePreparer.PrepareAsync(
+                            recoveredPreparedRoot, _settings.CfgConvertPath, LogLine, false);
+                        foreach (string item in protectedFinalPreparation.Warnings)
+                        {
+                            string warning = pboName + ": " + item;
+                            _steamImportWarnings.Add(warning);
+                            Log(warning, Color.Gold);
+                        }
+
                         string recoveredSourceRoot = Path.Combine(projectRoot, "source");
                         string recoveredDestination = Path.Combine(recoveredSourceRoot, pboName);
-                        await Task.Run(delegate { ReplaceDirectoryByCopy(recovery.SourceRoot, recoveredDestination); });
+                        await Task.Run(delegate { ReplaceDirectoryByCopy(recoveredPreparedRoot, recoveredDestination); });
                         SaveProjectPrefix(projectRoot, pboName, prefix);
-                        Log("PBO recuperado pelo addon Python: " + pboName + " → " + recoveredDestination + " — " + recovery.Summary, _success);
+                        Log("PBO recuperado pelo addon Python: " + pboName + " → " + recoveredDestination + " — " +
+                            recovery.Summary + " | " + protectedFinalPreparation.Summary,
+                            protectedFinalPreparation.IsComplete && protectedFinalPreparation.Warnings.Count == 0 ? _success : Color.Gold);
                         foreach (string item in recovery.Warnings)
                         {
                             string warning = pboName + ": " + item;
@@ -1977,7 +2095,7 @@ namespace DayZModWorkbench
                     try
                     {
                         Log(pboName + ": " + configRecoveryReason +
-                            " detectado; acionando addon Python v7 para recuperar config/scripts.", _accent);
+                            " detectado; acionando addon Python v8+ para recuperar config/scripts.", _accent);
                         ReportSteamPboProgress(progress, 0.50d, progressName + " — recuperando config e scripts");
                         PboSourceRecoveryResult recovery = await RecoverProtectedPbo(pbo, tempRoot, progress, pboName, true);
                         ShowSteamDetailProgress(0, pboName + " — verificando integridade dos arquivos");
@@ -1995,7 +2113,7 @@ namespace DayZModWorkbench
                         Log(pboName + ": " + audit.Summary + ".", _success);
                         _steamImportVerifications.Add(pboName + ": " + audit.VerifiedFiles + "/" +
                             audit.PayloadFiles + " arquivos conferidos por SHA-1");
-                        _steamImportVerifications.Add(pboName + ": v7 " + recovery.VerificationStatus +
+                        _steamImportVerifications.Add(pboName + ": v8+ " + recovery.VerificationStatus +
                             " — scripts " + recovery.RecoveredScripts + ", P3D " + recovery.VerifiedP3ds + "/" +
                             recovery.P3dCount + ", configs " + recovery.VerifiedConfigs + "/" + recovery.ConfigCount);
                         await Task.Run(delegate { MergeRecoveredPboSource(recovery.SourceRoot, extractedRoot); });
@@ -2010,8 +2128,8 @@ namespace DayZModWorkbench
                     }
                     catch (Exception ex)
                     {
-                        Log(pboName + ": addon Python não conseguiu recuperar o config nesta tentativa; " +
-                            "o conversor RaP interno ainda será testado. " + ex.Message, Color.Gold);
+                        Log(pboName + ": recuperação complementar Python não pôde ser aplicada integralmente nesta tentativa; " +
+                            "o config pode continuar recuperável pelo conversor RaP e a auditoria final será executada. " + ex.Message, Color.Gold);
                     }
                 }
 
@@ -2028,7 +2146,7 @@ namespace DayZModWorkbench
                     try
                     {
                         Log(pboName + ": config.bin permaneceu não editável após o conversor interno; " +
-                            "acionando fallback do addon Python v7.", _accent);
+                            "acionando fallback do addon Python v8+.", _accent);
                         ReportSteamPboProgress(progress, 0.70d, progressName + " — fallback de recuperação");
                         PboSourceRecoveryResult recovery = await RecoverProtectedPbo(pbo, tempRoot, progress, pboName, true);
                         ShowSteamDetailProgress(0, pboName + " — verificando integridade dos arquivos");
@@ -2047,7 +2165,7 @@ namespace DayZModWorkbench
                         _steamImportVerifications.Add(pboName + ": " + audit.AccountedFiles + "/" +
                             audit.PayloadFiles + " payloads contabilizados (" + audit.VerifiedFiles +
                             " SHA-1 exatos, " + audit.TransformedFiles + " transformações legítimas)");
-                        _steamImportVerifications.Add(pboName + ": v7 " + recovery.VerificationStatus +
+                        _steamImportVerifications.Add(pboName + ": v8+ " + recovery.VerificationStatus +
                             " — scripts " + recovery.RecoveredScripts + ", P3D " + recovery.VerifiedP3ds + "/" +
                             recovery.P3dCount + ", configs " + recovery.VerifiedConfigs + "/" + recovery.ConfigCount);
                         await Task.Run(delegate { MergeRecoveredPboSource(recovery.SourceRoot, extractedRoot); });
@@ -2161,8 +2279,26 @@ namespace DayZModWorkbench
                 properties.IndexOf("PBO Tools", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 properties.IndexOf("pbo.tools", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 properties.IndexOf("MPG Packer", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                properties.IndexOf("KGB_DF_", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                properties.IndexOf(".KGB", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                properties.IndexOf("__JAPM__", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 properties.IndexOf("protected PBO", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 properties.IndexOf("encrypted PBO", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static bool HasUnsafeBankRevExtraction(string output)
+        {
+            if (string.IsNullOrWhiteSpace(output)) return false;
+            if (output.IndexOf("failed with error 123", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                output.IndexOf("__JAPM__", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                output.IndexOf(".KGB", StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+
+            // A single timestamp failure can be environmental. Repeated failures
+            // indicate an extraction tree BankRev cannot safely represent on Windows.
+            int failures = Regex.Matches(output, "Cannot\\s+set\\s+file\\s+time,\\s+failed\\s+with\\s+error",
+                RegexOptions.IgnoreCase).Count;
+            return failures >= 3;
         }
 
         private async Task<PboSourceRecoveryResult> RecoverProtectedPbo(string pboPath, string tempRoot,

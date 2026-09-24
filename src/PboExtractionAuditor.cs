@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
+using System.Text;
 using System.Web.Script.Serialization;
 
 namespace DayZModWorkbench
@@ -123,6 +124,34 @@ namespace DayZModWorkbench
                     failures.Add(name + " (caminho fora da extração)");
                     continue;
                 }
+
+                // BankRev materializes raw PBO header bytes through the current
+                // Windows ANSI code page.  The Python manifest prefers valid
+                // UTF-8, so a legacy/double-encoded filename can legitimately
+                // have a different visible spelling on disk.  Resolve that
+                // deterministic representation only when the UTF-8 path is
+                // absent; containment and SHA-1 validation remain mandatory.
+                if (!File.Exists(target))
+                {
+                    string bankRevName = DecodeBankRevHeaderName(ReadString(entry, "raw_name_hex"));
+                    if (!string.IsNullOrEmpty(bankRevName) &&
+                        !bankRevName.Equals(name, StringComparison.Ordinal))
+                    {
+                        try
+                        {
+                            string bankRevTarget = Path.GetFullPath(Path.Combine(extractedRoot,
+                                bankRevName.Replace('/', Path.DirectorySeparatorChar)
+                                    .Replace('\\', Path.DirectorySeparatorChar)));
+                            if (bankRevTarget.StartsWith(root, StringComparison.OrdinalIgnoreCase) &&
+                                File.Exists(bankRevTarget)) target = bankRevTarget;
+                        }
+                        catch
+                        {
+                            // The regular missing-file diagnostic below remains authoritative.
+                        }
+                    }
+                }
+
                 if (!expectedPaths.Add(target))
                 {
                     failures.Add(name + " (nome duplicado no PBO)");
@@ -240,6 +269,22 @@ namespace DayZModWorkbench
         {
             object item;
             return value.TryGetValue(key, out item) && item != null ? Convert.ToString(item) : string.Empty;
+        }
+
+        private static string DecodeBankRevHeaderName(string rawHex)
+        {
+            if (string.IsNullOrWhiteSpace(rawHex) || (rawHex.Length & 1) != 0) return string.Empty;
+            try
+            {
+                byte[] bytes = new byte[rawHex.Length / 2];
+                for (int i = 0; i < bytes.Length; i++)
+                    bytes[i] = Convert.ToByte(rawHex.Substring(i * 2, 2), 16);
+                return Encoding.Default.GetString(bytes);
+            }
+            catch
+            {
+                return string.Empty;
+            }
         }
 
         private static string ComputeSha1(string path)

@@ -46,7 +46,7 @@ namespace DayZModWorkbench
                     "Auditoria RaP: " + RapFilesFound + " encontrado(s), " + ConvertedFiles +
                     " convertido(s), " + RapAlreadyEditable + " já acompanhado(s) por fonte válido e " +
                     BinaryFilesPreserved + (IsPreAudit
-                        ? " aguardando tentativa de recuperação v7. "
+                        ? " aguardando tentativa de recuperação pelo addon Python. "
                         : " preservado(s) ainda binário(s). ") +
                     TextureHeadersRemoved + " texheaders.bin removido(s) para regeneração no build. " +
                     OdolPreserved + " modelo(s) ODOL detectado(s) para reconstrução; " +

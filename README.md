@@ -69,6 +69,49 @@ Se um ODOL não for versão 53, 54 ou 55, a reconstrução estiver incompleta ou
 
 Ao final, a auditoria informa quantos arquivos RaP foram encontrados, convertidos, já possuíam fonte válido ou continuam binários. Quando o payload contém substituições UTF-8 `EF BF BD`, o addon v8 tenta primeiro a recuperação forense. Ele não aceita uma hipótese apenas porque o texto parece plausível: o RaP pré-corrupção reconstruído precisa reproduzir exatamente o payload danificado após a mesma transformação UTF-8 observada. Se essa prova não fechar e também não houver EmbeddedMaterial suficiente, o original é mantido e o resultado continua aparecendo como **SOURCE NÃO TOTALMENTE EDITÁVEL**. `texheaders.bin` é um índice/cache gerado das texturas PAA: o Workbench o ignora na source editável e o Addon Builder o recria no PBO final. O processo não cria `source_backups` nem `binary_backups`; durante uma substituição, usa somente uma pasta transitória para permitir reversão imediata em caso de erro e a remove ao concluir. Texturas PAA e áudios prontos para o jogo permanecem sem alteração. Tanto a reconstrução MLOD quanto a recuperação de scripts ofuscados devem ser validadas no Object Builder/DayZ antes da publicação; elas não equivalem ao projeto-fonte original do autor.
 
+## Workbench 1.8.4 / Addon 8.2.6 — sentinelas NaN em EmbeddedMaterial
+
+O comparador das variantes de `EmbeddedMaterial` agora trata componentes `NaN` correspondentes como o mesmo sentinela binário. Antes, duas leituras estruturalmente idênticas podiam ser classificadas como concorrentes porque, por definição, `NaN` não é igual a si próprio em ponto flutuante. A validação de consumo integral do LOD, referências e contagens permanece inalterada; layouts realmente diferentes continuam sendo rejeitados.
+
+No corpus `Barrels_and_casses_ByMeru`, os quatro P3D ODOL53 passam a ser verificados e reconstruídos como MLOD, incluindo `celestial_laba.p3d`, e a auditoria do PBO muda de `WARNING/LOSS` para `SEMANTIC-EXACT`. O detector T007 também passa a usar `data_size` em entradas não comprimidas e `original_size` apenas em Cprs, evitando classificar um payload comum como vazio.
+
+## Workbench 1.8.3 / Addon 8.2.5 — grafo Cprs randomizado
+
+O addon inclui a técnica estrutural `T007 randomized-cprs-include-graph` para PBOs com alta densidade Cprs, nomes de cabeçalho aleatórios/ilegais, grandes blocos de entradas curinga `*.*` e payloads vazios camuflados como assets válidos. A detecção não depende do nome do mod: exige simultaneamente as proporções do arquivo, uma raiz `config.cpp`, módulos DayZ e múltiplos falsos assets vazios. Técnicas marcadas ou identificadas anteriormente continuam com precedência.
+
+Na recuperação, o grafo de includes continua sendo expandido e verificado sem perda, mas os payloads vazios do campo de decoys não são materializados na source. `RANDOMIZED_CPRS_MAP.json` registra os índices e caminhos filtrados; o verificador relê o PBO, prova que cada índice realmente tem payload vazio e falha se algum placeholder reaparecer. O Workbench exige agora a capability `RANDOMIZED_CPRS_INCLUDE_GRAPH_RECOVERY`, evitando regressão silenciosa para o fallback genérico.
+
+## Workbench 1.8.2 — auditoria de nomes legados do BankRev
+
+A auditoria integral agora reconhece de forma determinística quando o BankRev materializa bytes de nome do cabeçalho PBO pela página ANSI ativa do Windows, enquanto o manifesto Python consegue decodificar esses mesmos bytes como UTF-8. O fallback só é usado quando o caminho UTF-8 não existe e continua exigindo caminho confinado à extração e SHA-1 idêntico ao payload original.
+
+No corpus `Barrels_and_casses_ByMeru_Data`, os 21/21 payloads extraídos pelo BankRev passam a ser contabilizados, inclusive o OGG de nome cirílico legado, sem relaxar a validação de conteúdo nem promover esse OGG de CRC inválido para a source limpa da recuperação Python.
+
+## Addon 8.2.4 — eixos ODOL separados em escala submilimétrica
+
+A prova por endpoint exato agora aceita como distinto um concorrente afastado por pelo menos 0,1 mm, sem relaxar a tolerância de coincidência exata de 0,01 mm. Isso preserva a rejeição de endpoints efetivamente sobrepostos e recupera seleções paralelas legítimas usadas por modelos pequenos.
+
+No corpus `FatalZ_QBox`, os dois modelos animados recuperam sem avisos `qbox_1_rot`, `qbox_2_rot` e `qbox_3_rot` em `colour1_axis`, além de `qbox_4_rot` em `colour4_axis`. A capability `ODOL_SUBMILLIMETER_AXIS_ENDPOINT_DISAMBIGUATION` impede que o Workbench aceite silenciosamente um addon anterior sem essa garantia.
+
+## Addon 8.2.3 — desambiguação exata de eixos ODOL
+
+A recuperação de `model.cfg` agora usa a coincidência byte/float do `axisPos` compilado com um endpoint de seleção Memory como evidência geométrica decisiva, desde que a direção esteja alinhada e os endpoints concorrentes estejam claramente separados. O critério é genérico e não depende do nome do mod ou da seleção; candidatos realmente coincidentes continuam sendo rejeitados como ambíguos.
+
+No corpus `FatalZ_Billboards`, `Prop` e `Boardspin` são ligados com prova exata a `spin1_axis` nos dois ODOL54, enquanto `Board` permanece na forma lossless `translationY`. O `model.cfg` passa de quatro avisos para `SEMANTIC-EXACT` com zero diferenças. O Workbench exige a capability `ODOL_EXACT_AXIS_ENDPOINT_DISAMBIGUATION` para impedir downgrade silencioso.
+
+## Addon 8.2.2 — layouts EmbeddedMaterial sem regressão
+
+O parser ODOL trata separadamente o layout de dois parâmetros usado por `EmbeddedMaterial` v15 e o layout de seis parâmetros encontrado em outras revisões v11-v19, incluindo os modelos v16 de `Corridor_Parts`. Como proteção adicional, cada LOD é testado pelas variantes compatíveis, precisa consumir exatamente o intervalo declarado e passar validações estruturais. Interpretações concorrentes são rejeitadas como ambíguas em vez de gerar MLOD silenciosamente incorreto.
+
+O Workbench exige a capability `ODOL_EMBEDDED_MATERIAL_LAYOUT_VARIANTS`, mantendo simultaneamente as técnicas de recuperação PBO Tools, Fire Packer, Mikero e KGB/JAPM. No corpus `Corridor_Parts`, a auditoria exige 15/15 P3D, 11/11 RVMAT e 2/2 configs `SEMANTIC-EXACT`, além do `model.cfg` dos dois modelos animados sem diferenças.
+
+## Workbench 1.8.1 + addon 8.2.0 — KGB/JAPM e ODOL53
+
+A importação agora reconhece falhas de caminho do BankRev como sinal de extração insegura antes de enumerar a árvore temporária. PBOs com marcadores KGB/JAPM (`.KGB`, `__JAPM__`, caminhos reservados e armadilhas equivalentes) fazem fallback automático para a recuperação Python especializada, evitando `DirectoryNotFoundException` e erros 123 em nomes que não representam source real.
+
+O addon 8.2.0 adiciona a técnica `T006 kgb-japm`, separa P3D reais de arquivos-decoy pela assinatura do payload, reconstrói os módulos `3_Game`, `4_World` e `5_Mission`, renomeia deterministicamente colisões causadas por sanitização de nomes e mantém a contagem física da source recuperada sem sobrescritas silenciosas. O verificador exclui P3D falsos da contagem sem dispensar SHA-1/Cprs do PBO inteiro.
+
+O parser ODOL corrige o alinhamento de `EmbeddedMaterial` v15 usado por modelos ODOL53 do DayZ. O Workbench 1.8.1 exige addon modular **8.2.0 ou superior** e as capabilities `GENERIC_DECOY_FILTER`, `KGB_JAPM_RECOVERY`, `PBO_COLLISION_SAFE_RECOVERY` e `ODOL53_MATERIAL_V15_ALIGNMENT`.
 
 ## Workbench 1.8.0 — gerenciamento de Drive P e junctions
 
@@ -82,7 +125,7 @@ Por segurança, o Workbench só remove junctions que constam em seu próprio man
 
 ## Compilar o programa
 
-Execute `build.bat`. O Visual Studio já instalado fornece o MSBuild necessário.
+Execute `build.bat`. O projeto usa o formato SDK-style e requer o SDK .NET 8 no `PATH`; o aplicativo produzido continua direcionado ao .NET Framework 4.7.2 e ao Windows Forms.
 
 ## Build e releases no GitHub
 

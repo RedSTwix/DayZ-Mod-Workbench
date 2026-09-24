@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.IO;
 using System.Net;
@@ -18,8 +18,20 @@ namespace DayZModWorkbench
 
         private const int SupportedManifestSchema = 1;
         private const int SupportedAddonApi = 1;
-        private const string MinimumManagedAddonVersion = "8.0.1";
-        private const string RequiredManagedCapability = "GENERIC_DECOY_FILTER";
+        private const string MinimumManagedAddonVersion = "8.2.6";
+        private static readonly string[] RequiredManagedCapabilities =
+        {
+            "GENERIC_DECOY_FILTER",
+            "KGB_JAPM_RECOVERY",
+            "PBO_COLLISION_SAFE_RECOVERY",
+            "ODOL53_MATERIAL_V15_ALIGNMENT",
+            "ODOL_EMBEDDED_MATERIAL_LAYOUT_VARIANTS",
+            "ODOL_EXACT_AXIS_ENDPOINT_DISAMBIGUATION",
+            "ODOL_SUBMILLIMETER_AXIS_ENDPOINT_DISAMBIGUATION",
+            "PBO_PREFLIGHT_ROUTING",
+            "RANDOMIZED_CPRS_INCLUDE_GRAPH_RECOVERY",
+            "ODOL_NAN_SENTINEL_EQUIVALENCE"
+        };
 
         private const string ManifestUrl =
             "https://raw.githubusercontent.com/RedSTwix/DayZ-Mod-Workbench-Updates/main/manifest.json";
@@ -763,14 +775,18 @@ namespace DayZModWorkbench
             Version minimumEngine = ParseVersion(MinimumManagedAddonVersion, "engine mínimo do addon");
             if (installedEngine.CompareTo(minimumEngine) < 0)
                 throw new InvalidOperationException("Addon modular antigo (" + installedManifest.engine +
-                    "); o Workbench 1.7.7 exige " + MinimumManagedAddonVersion + " ou superior.");
+                    "); o Workbench 1.8.4 exige " + MinimumManagedAddonVersion + " ou superior.");
             if (installedManifest.api != SupportedAddonApi)
                 throw new InvalidOperationException("API do addon local não suportada: " + installedManifest.api + ".");
-            if (installedManifest.capabilities == null ||
-                Array.FindIndex(installedManifest.capabilities, capability =>
-                    string.Equals(capability, RequiredManagedCapability, StringComparison.OrdinalIgnoreCase)) < 0)
-                throw new InvalidOperationException("O addon modular não declara a capability obrigatória " +
-                    RequiredManagedCapability + ".");
+            if (installedManifest.capabilities == null)
+                throw new InvalidOperationException("O addon modular não declara capabilities.");
+            foreach (string requiredCapability in RequiredManagedCapabilities)
+            {
+                if (Array.FindIndex(installedManifest.capabilities, capability =>
+                    string.Equals(capability, requiredCapability, StringComparison.OrdinalIgnoreCase)) < 0)
+                    throw new InvalidOperationException("O addon modular não declara a capability obrigatória " +
+                        requiredCapability + ".");
+            }
 
             string[] pythonFiles = Directory.GetFiles(
                 engine, "*.py", SearchOption.AllDirectories);

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -8,6 +8,35 @@ using System.Threading.Tasks;
 
 namespace DayZModWorkbench
 {
+    internal sealed class PboPreflightProbeResult
+    {
+        public int schema { get; set; }
+        public bool prefer_python { get; set; }
+        public string[] reason_codes { get; set; }
+        public string technique { get; set; }
+        public string technique_id { get; set; }
+        public string technique_family { get; set; }
+        public bool technique_matched { get; set; }
+        public double technique_confidence { get; set; }
+        public double automatic_threshold { get; set; }
+        public bool technique_fallback { get; set; }
+        public int file_entries { get; set; }
+        public int unsafe_path_entries { get; set; }
+
+        public string Summary
+        {
+            get
+            {
+                string techniqueText = string.IsNullOrWhiteSpace(technique)
+                    ? "técnica não identificada"
+                    : "técnica " + technique + " (confidence " + technique_confidence.ToString("0.000") + ")";
+                if (unsafe_path_entries > 0)
+                    return techniqueText + "; " + unsafe_path_entries + " caminho(s) de cabeçalho incompatível(is) com extração Win32";
+                return techniqueText;
+            }
+        }
+    }
+
     internal sealed class PboSourceRecoveryResult
     {
         public string SourceRoot;
@@ -78,6 +107,45 @@ namespace DayZModWorkbench
     internal static class PboSourceReconstructor
     {
         private const double MinimumSpecializedTechniqueConfidence = 0.95d;
+
+        internal static async Task<PboPreflightProbeResult> ProbeAsync(string pboPath,
+            string pythonPath, string converterScriptPath)
+        {
+            if (!File.Exists(pboPath)) throw new FileNotFoundException("PBO não encontrado.", pboPath);
+            if (!File.Exists(pythonPath)) throw new FileNotFoundException("Python não encontrado.", pythonPath);
+            if (!File.Exists(converterScriptPath)) throw new FileNotFoundException("Addon ODOL/PBO não encontrado.", converterScriptPath);
+
+            string converterContents = File.ReadAllText(converterScriptPath);
+            if (converterContents.IndexOf("PBO_PREFLIGHT_ROUTING", StringComparison.Ordinal) < 0)
+                throw new InvalidOperationException("O addon Python local não oferece pré-análise genérica de PBO. Atualize para o addon modular v8.2.6 ou superior.");
+
+            string launcherOption = Path.GetFileName(pythonPath).Equals("py.exe", StringComparison.OrdinalIgnoreCase) ? "-3 " : string.Empty;
+            string arguments = launcherOption + "-u " + ProcessRunner.Quote(converterScriptPath) + " " +
+                ProcessRunner.Quote(pboPath) + " --probe-pbo";
+            ProcessResult process = await ProcessRunner.RunAsync(pythonPath, arguments,
+                Path.GetDirectoryName(pboPath), null, 60000);
+            if (process.ExitCode != 0)
+                throw new InvalidOperationException("A pré-análise Python terminou com código " + process.ExitCode + ".");
+
+            Match match = Regex.Match(process.Output ?? string.Empty,
+                @"^PBO_PROBE_JSON\s+(\{.*\})\s*$", RegexOptions.Multiline);
+            if (!match.Success)
+                throw new InvalidOperationException("O addon Python não retornou PBO_PROBE_JSON na pré-análise.");
+
+            PboPreflightProbeResult result;
+            try
+            {
+                result = new JavaScriptSerializer().Deserialize<PboPreflightProbeResult>(match.Groups[1].Value);
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException("O resultado da pré-análise do PBO é inválido.", ex);
+            }
+            if (result == null || result.schema != 1)
+                throw new InvalidOperationException("Schema de pré-análise de PBO não suportado.");
+            return result;
+        }
+
         internal static async Task<PboSourceRecoveryResult> RecoverAsync(string pboPath, string outputRoot,
             string pythonPath, string converterScriptPath, string cfgConvertPath, Action<string> log)
         {
@@ -92,8 +160,17 @@ namespace DayZModWorkbench
                 converterContents.IndexOf("PBO_FULL_PAYLOAD_RECOVERY", StringComparison.Ordinal) < 0 ||
                 converterContents.IndexOf("PBO_TOOLS_MARKER_RECOVERY", StringComparison.Ordinal) < 0 ||
                 converterContents.IndexOf("PBO_TOOLS_V18_MARKER_RECOVERY", StringComparison.Ordinal) < 0 ||
-                converterContents.IndexOf("GENERIC_DECOY_FILTER", StringComparison.Ordinal) < 0)
-                throw new InvalidOperationException("O addon Python local não oferece as garantias de recuperação exigidas pelo Workbench 1.7.7. Atualize para o addon modular v8.0.1 ou superior.");
+                converterContents.IndexOf("GENERIC_DECOY_FILTER", StringComparison.Ordinal) < 0 ||
+                converterContents.IndexOf("KGB_JAPM_RECOVERY", StringComparison.Ordinal) < 0 ||
+                converterContents.IndexOf("PBO_COLLISION_SAFE_RECOVERY", StringComparison.Ordinal) < 0 ||
+                converterContents.IndexOf("ODOL53_MATERIAL_V15_ALIGNMENT", StringComparison.Ordinal) < 0 ||
+                converterContents.IndexOf("ODOL_EMBEDDED_MATERIAL_LAYOUT_VARIANTS", StringComparison.Ordinal) < 0 ||
+                converterContents.IndexOf("ODOL_EXACT_AXIS_ENDPOINT_DISAMBIGUATION", StringComparison.Ordinal) < 0 ||
+                converterContents.IndexOf("ODOL_SUBMILLIMETER_AXIS_ENDPOINT_DISAMBIGUATION", StringComparison.Ordinal) < 0 ||
+                converterContents.IndexOf("PBO_PREFLIGHT_ROUTING", StringComparison.Ordinal) < 0 ||
+                converterContents.IndexOf("RANDOMIZED_CPRS_INCLUDE_GRAPH_RECOVERY", StringComparison.Ordinal) < 0 ||
+                converterContents.IndexOf("ODOL_NAN_SENTINEL_EQUIVALENCE", StringComparison.Ordinal) < 0)
+                throw new InvalidOperationException("O addon Python local não oferece as garantias de recuperação exigidas por esta versão do Workbench. Atualize para o addon modular v8.2.6 ou superior.");
 
             Directory.CreateDirectory(outputRoot);
             string launcherOption = Path.GetFileName(pythonPath).Equals("py.exe", StringComparison.OrdinalIgnoreCase) ? "-3 " : string.Empty;
@@ -271,7 +348,7 @@ namespace DayZModWorkbench
         {
             Match match = Regex.Match(report, "^" + Regex.Escape(label) + @"\s*:\s*(\d+)\s*/\s*(\d+)",
                 RegexOptions.IgnoreCase | RegexOptions.Multiline);
-            if (!match.Success) throw new InvalidOperationException("Campo proporcional ausente no relatório v7: " + label);
+            if (!match.Success) throw new InvalidOperationException("Campo proporcional ausente no relatório do addon: " + label);
             value = int.Parse(match.Groups[1].Value);
             total = int.Parse(match.Groups[2].Value);
         }

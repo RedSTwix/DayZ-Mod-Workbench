@@ -3,6 +3,7 @@ bin/
 obj/
 .vs/
 *.exe
+DayZModWorkbench.exe.config
 *.dll
 *.pdb
 *.cache
@@ -30,6 +31,7 @@ addons/
 
 # Chaves privadas locais; nunca versionar ou distribuir
 keys/
+tests/
 senha.txt
 configs/
 editor files/
