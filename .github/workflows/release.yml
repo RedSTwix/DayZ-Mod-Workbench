@@ -86,7 +86,9 @@ jobs:
     name: Publicar release da tag
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build
-    runs-on: windows-latest
+    # A publicação apenas baixa artefatos e chama ações do GitHub; Linux reduz
+    # a espera por runners Windows, reservados para a compilação do WinForms.
+    runs-on: ubuntu-latest
     permissions:
       contents: write
       id-token: write
