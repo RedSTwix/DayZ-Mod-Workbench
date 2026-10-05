@@ -26,8 +26,9 @@ settings.ini
 Thumbs.db
 Desktop.ini
 
-# Addons gerenciados/atualizados pelo próprio Workbench
-addons/
+# Cache gerado pelo addon Python
+__pycache__/
+*.pyc
 
 # Chaves privadas locais; nunca versionar ou distribuir
 keys/

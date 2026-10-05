@@ -18,7 +18,7 @@ namespace DayZModWorkbench
 
         private const int SupportedManifestSchema = 1;
         private const int SupportedAddonApi = 1;
-        private const string MinimumManagedAddonVersion = "8.2.6";
+        private const string MinimumManagedAddonVersion = "8.2.10";
         private static readonly string[] RequiredManagedCapabilities =
         {
             "GENERIC_DECOY_FILTER",
@@ -30,7 +30,11 @@ namespace DayZModWorkbench
             "ODOL_SUBMILLIMETER_AXIS_ENDPOINT_DISAMBIGUATION",
             "PBO_PREFLIGHT_ROUTING",
             "RANDOMIZED_CPRS_INCLUDE_GRAPH_RECOVERY",
-            "ODOL_NAN_SENTINEL_EQUIVALENCE"
+            "ODOL_NAN_SENTINEL_EQUIVALENCE",
+            "ODOL_PROXY_FACE_PRESERVATION",
+            "ODOL55_ANIMATION_FLAG_ALIGNMENT",
+            "ODOL_MODEL_SECTION_RECOVERY",
+            "PBO_GENERIC_REPLAY_VERIFICATION"
         };
 
         private const string ManifestUrl =
@@ -775,7 +779,7 @@ namespace DayZModWorkbench
             Version minimumEngine = ParseVersion(MinimumManagedAddonVersion, "engine mínimo do addon");
             if (installedEngine.CompareTo(minimumEngine) < 0)
                 throw new InvalidOperationException("Addon modular antigo (" + installedManifest.engine +
-                    "); o Workbench 1.8.4 exige " + MinimumManagedAddonVersion + " ou superior.");
+                    "); o Workbench 1.8.7 exige " + MinimumManagedAddonVersion + " ou superior.");
             if (installedManifest.api != SupportedAddonApi)
                 throw new InvalidOperationException("API do addon local não suportada: " + installedManifest.api + ".");
             if (installedManifest.capabilities == null)

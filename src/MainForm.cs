@@ -2435,7 +2435,7 @@ namespace DayZModWorkbench
             if (Directory.Exists(destination))
             {
                 displaced = destination + ".dayzworkbench-replace-" + Guid.NewGuid().ToString("N");
-                Directory.Move(destination, displaced);
+                MoveDirectoryWithRetry(destination, displaced);
             }
 
             try
@@ -2447,7 +2447,7 @@ namespace DayZModWorkbench
             {
                 TryDeleteDirectory(destination);
                 if (displaced != null && Directory.Exists(displaced) && !Directory.Exists(destination))
-                    Directory.Move(displaced, destination);
+                    MoveDirectoryWithRetry(displaced, destination);
                 throw;
             }
 
@@ -2465,21 +2465,51 @@ namespace DayZModWorkbench
             if (Directory.Exists(destination))
             {
                 displaced = destination + ".dayzworkbench-replace-" + Guid.NewGuid().ToString("N");
-                Directory.Move(destination, displaced);
+                MoveDirectoryWithRetry(destination, displaced);
             }
 
             try
             {
-                Directory.Move(replacementSource, destination);
+                MoveDirectoryWithRetry(replacementSource, destination);
             }
             catch
             {
                 if (displaced != null && Directory.Exists(displaced) && !Directory.Exists(destination))
-                    Directory.Move(displaced, destination);
+                    MoveDirectoryWithRetry(displaced, destination);
                 throw;
             }
 
             if (displaced != null) TryDeleteDirectory(displaced);
+        }
+
+        private static void MoveDirectoryWithRetry(string source, string destination)
+        {
+            const int attempts = 8;
+            Exception lastError = null;
+            for (int attempt = 1; attempt <= attempts; attempt++)
+            {
+                try
+                {
+                    Directory.Move(source, destination);
+                    return;
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    lastError = ex;
+                }
+                catch (IOException ex)
+                {
+                    lastError = ex;
+                }
+
+                if (attempt < attempts)
+                    System.Threading.Thread.Sleep(100 * attempt);
+            }
+
+            throw new IOException(
+                "Não foi possível substituir a source após " + attempts +
+                " tentativas. Algum editor, antivírus ou junction pode estar mantendo a pasta aberta: " + source,
+                lastError);
         }
 
         private static string MakeProjectFolderName(string value)

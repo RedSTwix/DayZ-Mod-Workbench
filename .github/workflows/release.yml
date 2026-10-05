@@ -62,6 +62,8 @@ jobs:
           Copy-Item bin\DayZModWorkbench.exe dist\package\DayZModWorkbench.exe -Force
           Copy-Item bin\DayZModWorkbench.exe.config dist\package\DayZModWorkbench.exe.config -Force
           Copy-Item README.md dist\package\README.md -Force
+          Copy-Item LICENSE dist\package\LICENSE -Force
+          Copy-Item addons dist\package\addons -Recurse -Force
 
           $archive = "dist\DayZ-Mod-Workbench-v$version.zip"
           Compress-Archive -Path dist\package\* -DestinationPath $archive -CompressionLevel Optimal

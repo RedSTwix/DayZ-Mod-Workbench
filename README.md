@@ -1,5 +1,9 @@
 # DayZ Mod Workbench
 
+[![Build](https://github.com/RedSTwix/DayZ-Mod-Workbench/actions/workflows/release.yml/badge.svg)](https://github.com/RedSTwix/DayZ-Mod-Workbench/actions/workflows/release.yml)
+[![Release](https://img.shields.io/github/v/release/RedSTwix/DayZ-Mod-Workbench)](https://github.com/RedSTwix/DayZ-Mod-Workbench/releases/latest)
+[![Licença MIT](https://img.shields.io/badge/licen%C3%A7a-MIT-yellow.svg)](LICENSE)
+
 Aplicativo C# para trabalhar com os projetos armazenados em:
 
 `C:\Users\<usuario>\Desktop\edit mod`
@@ -68,6 +72,24 @@ O WorkDrive do DayZ Tools pode permanecer aguardando uma tecla mesmo depois de c
 Se um ODOL não for versão 53, 54 ou 55, a reconstrução estiver incompleta ou o relatório indicar erro, o Workbench rejeita a saída reconstruída e preserva o modelo original. Um `config.cpp` vazio ou composto apenas por espaços não impede mais a conversão do `config.bin`. Configs e materiais RaP são lidos por um parser interno com validação estrita de tipos, limites, contagens e offsets; o texto reconstruído é recompilado apenas para validação antes de substituir o original. Assim, um arquivo defeituoso não prende o `CfgConvert`, não faz os demais arquivos serem ignorados e nunca é contado como convertido apenas porque uma ferramenta retornou código zero.
 
 Ao final, a auditoria informa quantos arquivos RaP foram encontrados, convertidos, já possuíam fonte válido ou continuam binários. Quando o payload contém substituições UTF-8 `EF BF BD`, o addon v8 tenta primeiro a recuperação forense. Ele não aceita uma hipótese apenas porque o texto parece plausível: o RaP pré-corrupção reconstruído precisa reproduzir exatamente o payload danificado após a mesma transformação UTF-8 observada. Se essa prova não fechar e também não houver EmbeddedMaterial suficiente, o original é mantido e o resultado continua aparecendo como **SOURCE NÃO TOTALMENTE EDITÁVEL**. `texheaders.bin` é um índice/cache gerado das texturas PAA: o Workbench o ignora na source editável e o Addon Builder o recria no PBO final. O processo não cria `source_backups` nem `binary_backups`; durante uma substituição, usa somente uma pasta transitória para permitir reversão imediata em caso de erro e a remove ao concluir. Texturas PAA e áudios prontos para o jogo permanecem sem alteração. Tanto a reconstrução MLOD quanto a recuperação de scripts ofuscados devem ser validadas no Object Builder/DayZ antes da publicação; elas não equivalem ao projeto-fonte original do autor.
+
+## Workbench 1.8.7 / Addon 8.2.10 — replay integral da source genérica
+
+O pacote de release inclui o addon Python 8.2.10 completo, pronto para uso sem baixar uma atualização.
+
+O verificador dos métodos T001/T007 agora refaz a expansão do grafo diretamente do PBO original em uma pasta isolada e compara byte a byte todos os scripts e configs recuperados. Um arquivo ausente, truncado, alterado ou inesperado passa a produzir `WARNING/LOSS`; a existência isolada do caminho não é mais aceita como equivalência. O Workbench exige a capability `PBO_GENERIC_REPLAY_VERIFICATION`, impedindo que uma instalação 8.2.9 continue emitindo o antigo falso positivo.
+
+## Workbench 1.8.6 / Addon 8.2.9 — seções de modelo e variantes de textura
+
+O recuperador agora reconstrói `CfgModels.sections[]` diretamente dos marcadores de seleções seccionais gravados no ODOL. Isso preserva `hiddenSelectionsTextures[]`, trocas de material e variantes de cor ao recompilar uma source. No corpus `YRTSK_Wasp_Olympus`, as 18 seções originais — incluindo `camo`, `camo2` e seleções de luz — são idênticas no ODOL54 original e no ODOL55 recompilado, mantendo também os 69 proxies e a animação `DrivingWheel`. O Workbench exige a capability `ODOL_MODEL_SECTION_RECOVERY` para impedir downgrade silencioso.
+
+## Workbench 1.8.5 / Addon 8.2.8 — round-trip de proxies ODOL
+
+O conversor ODOL→MLOD agora preserva a face triangular exata de cada proxy mesmo quando vários proxies compartilham a mesma seção ODOL. A implementação anterior marcava todas as faces da seção em cada seleção; o Addon Builder descartava essas seleções inválidas e recompilava veículos sem proxies de rodas, tripulação, bateria ou faróis. A verificação independente passa a rejeitar qualquer proxy cuja seleção MLOD não corresponda à face e aos vértices do ODOL original.
+
+O leitor ODOL55 também distingue o byte de alinhamento que pode anteceder `hasAnims`, evitando auditorias que informavam incorretamente a ausência de animações em um modelo recompilado. O corpus `YRTSK_Wasp_Olympus` confirma os 69 proxies distribuídos nos mesmos LODs do original e a animação `DrivingWheel` após recompilação. O Workbench exige as capabilities `ODOL_PROXY_FACE_PRESERVATION` e `ODOL55_ANIMATION_FLAG_ALIGNMENT`.
+
+A instalação de uma source recuperada repete a troca atômica do diretório quando Windows Defender, editores ou junctions mantêm um handle transitório. O resultado validado permanece temporário durante as tentativas, e a source anterior continua sendo restaurada caso a substituição não possa ser concluída.
 
 ## Workbench 1.8.4 / Addon 8.2.6 — sentinelas NaN em EmbeddedMaterial
 

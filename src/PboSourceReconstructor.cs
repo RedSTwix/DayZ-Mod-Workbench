@@ -117,7 +117,7 @@ namespace DayZModWorkbench
 
             string converterContents = File.ReadAllText(converterScriptPath);
             if (converterContents.IndexOf("PBO_PREFLIGHT_ROUTING", StringComparison.Ordinal) < 0)
-                throw new InvalidOperationException("O addon Python local não oferece pré-análise genérica de PBO. Atualize para o addon modular v8.2.6 ou superior.");
+                throw new InvalidOperationException("O addon Python local não oferece pré-análise genérica de PBO. Atualize para o addon modular v8.2.10 ou superior.");
 
             string launcherOption = Path.GetFileName(pythonPath).Equals("py.exe", StringComparison.OrdinalIgnoreCase) ? "-3 " : string.Empty;
             string arguments = launcherOption + "-u " + ProcessRunner.Quote(converterScriptPath) + " " +
@@ -169,8 +169,12 @@ namespace DayZModWorkbench
                 converterContents.IndexOf("ODOL_SUBMILLIMETER_AXIS_ENDPOINT_DISAMBIGUATION", StringComparison.Ordinal) < 0 ||
                 converterContents.IndexOf("PBO_PREFLIGHT_ROUTING", StringComparison.Ordinal) < 0 ||
                 converterContents.IndexOf("RANDOMIZED_CPRS_INCLUDE_GRAPH_RECOVERY", StringComparison.Ordinal) < 0 ||
-                converterContents.IndexOf("ODOL_NAN_SENTINEL_EQUIVALENCE", StringComparison.Ordinal) < 0)
-                throw new InvalidOperationException("O addon Python local não oferece as garantias de recuperação exigidas por esta versão do Workbench. Atualize para o addon modular v8.2.6 ou superior.");
+                converterContents.IndexOf("ODOL_NAN_SENTINEL_EQUIVALENCE", StringComparison.Ordinal) < 0 ||
+                converterContents.IndexOf("ODOL_PROXY_FACE_PRESERVATION", StringComparison.Ordinal) < 0 ||
+                converterContents.IndexOf("ODOL55_ANIMATION_FLAG_ALIGNMENT", StringComparison.Ordinal) < 0 ||
+                converterContents.IndexOf("ODOL_MODEL_SECTION_RECOVERY", StringComparison.Ordinal) < 0 ||
+                converterContents.IndexOf("PBO_GENERIC_REPLAY_VERIFICATION", StringComparison.Ordinal) < 0)
+                throw new InvalidOperationException("O addon Python local não oferece as garantias de recuperação exigidas por esta versão do Workbench. Atualize para o addon modular v8.2.10 ou superior.");
 
             Directory.CreateDirectory(outputRoot);
             string launcherOption = Path.GetFileName(pythonPath).Equals("py.exe", StringComparison.OrdinalIgnoreCase) ? "-3 " : string.Empty;

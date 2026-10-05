@@ -1,0 +1,130 @@
+{
+  "engine": "8.2.10",
+  "api": 1,
+  "entrypoint": "deodol_source_windows.py",
+  "script_version": "UNIVERSAL-AXIS-PBO-v8.2.10-GENERIC-SOURCE-REPLAY-SAFE",
+  "techniques": {
+    "generic_include_graph": "1.2.1",
+    "pbotools_v18": "1.0.0",
+    "pbotools_v19": "1.0.0",
+    "fire_packer": "1.3.0",
+    "mikero_cyrillic": "1.1.1",
+    "kgb_japm": "1.1.0",
+    "randomized_cprs": "1.0.0"
+  },
+  "capabilities": [
+    "PBO_FULL_PAYLOAD_RECOVERY",
+    "PBO_TOOLS_MARKER_RECOVERY",
+    "PBO_TOOLS_V18_MARKER_RECOVERY",
+    "RVMAT_SOURCE_PROOF",
+    "ODOL53_55_MLOD",
+    "GENERIC_DECOY_FILTER",
+    "FIRE_PACKER_MARKER_RECOVERY",
+    "FIRE_PACKER_SEMANTIC_NAMES",
+    "FIRE_PACKER_INCLUDE_BRIDGE_RECOVERY",
+    "CLEAN_RAP_RVMAT_RECOVERY",
+    "CLEAN_RAP_NUMERIC_SUBTYPE_PRESERVATION",
+    "TECHNIQUE_METADATA_V1",
+    "SKELETON_ONLY_MODEL_CFG_RECOVERY",
+    "MIKERO_CYRILLIC_MANGLE_RECOVERY",
+    "MIKERO_REFERENCE_REWRITE",
+    "MIKERO_ROOTED_REFERENCE_RECOVERY",
+    "MIKERO_FAKE_EXTENSION_BRIDGE_VERIFICATION",
+    "ODOL_UNBOUND_ANIMATION_PRESERVATION",
+    "ODOL_EXACT_AXIS_LINE_DISAMBIGUATION",
+    "ODOL_EXACT_AXIS_ENDPOINT_DISAMBIGUATION",
+    "ODOL_SUBMILLIMETER_AXIS_ENDPOINT_DISAMBIGUATION",
+    "KGB_JAPM_RECOVERY",
+    "KGB_JAPM_CONDITIONAL_DEOBFUSCATION",
+    "PBO_COLLISION_SAFE_RECOVERY",
+    "ODOL53_MATERIAL_V15_ALIGNMENT",
+    "ODOL_EMBEDDED_MATERIAL_LAYOUT_VARIANTS",
+    "PBO_PREFLIGHT_ROUTING",
+    "PBO_GENERIC_REPLAY_VERIFICATION",
+    "RANDOMIZED_CPRS_INCLUDE_GRAPH_RECOVERY",
+    "ODOL_NAN_SENTINEL_EQUIVALENCE",
+    "ODOL_PROXY_FACE_PRESERVATION",
+    "ODOL55_ANIMATION_FLAG_ALIGNMENT",
+    "ODOL_MODEL_SECTION_RECOVERY"
+  ],
+  "technique_catalog_version": 1,
+  "technique_catalog": {
+    "T001": {
+      "key": "generic_include_graph",
+      "name": "generic-include-graph",
+      "version": "1.2.1",
+      "family": "generic",
+      "fallback": true
+    },
+    "T002": {
+      "key": "pbotools_v18",
+      "name": "pbotools-v18-marker",
+      "version": "1.0.0",
+      "family": "pbo-tools",
+      "fallback": false
+    },
+    "T003": {
+      "key": "pbotools_v19",
+      "name": "pbotools-v19-marker",
+      "version": "1.0.0",
+      "family": "pbo-tools",
+      "fallback": false
+    },
+    "T004": {
+      "key": "fire_packer",
+      "name": "fire-packer-marker",
+      "version": "1.3.0",
+      "family": "fire-packer",
+      "fallback": false
+    },
+    "T005": {
+      "key": "mikero_cyrillic",
+      "name": "mikero-cyrillic-mangle",
+      "version": "1.1.1",
+      "family": "mikero-depbo",
+      "fallback": false
+    },
+    "T006": {
+      "key": "kgb_japm",
+      "name": "kgb-japm",
+      "version": "1.1.0",
+      "family": "kgb-japm",
+      "fallback": false
+    },
+    "T007": {
+      "key": "randomized_cprs",
+      "name": "randomized-cprs-include-graph",
+      "version": "1.0.0",
+      "family": "randomized-cprs",
+      "fallback": false
+    }
+  },
+  "capability_versions": {
+    "standalone_clean_rap_rvmat": 3,
+    "fire_packer_include_bridges": 1,
+    "fire_packer_semantic_names": 3,
+    "mikero_cyrillic_mangle": 1,
+    "mikero_reference_rewrite": 2,
+    "mikero_ogg_crc_filter": 1,
+    "odol_unbound_animations": 1,
+    "odol_exact_axis_line_disambiguation": 1,
+    "odol_exact_axis_endpoint_disambiguation": 2,
+    "odol_submillimeter_axis_endpoint_disambiguation": 1,
+    "mikero_rooted_references": 1,
+    "mikero_fake_extension_bridge_verification": 1,
+    "clean_rap_numeric_subtype_preservation": 1,
+    "kgb_japm_recovery": 2,
+    "kgb_japm_conditional_deobfuscation": 1,
+    "pbo_collision_safe_recovery": 1,
+    "odol53_material_v15_alignment": 1,
+    "odol_embedded_material_layout_variants": 1,
+    "pbo_preflight_routing": 1,
+    "pbo_generic_include_graph": 3,
+    "pbo_generic_replay_verification": 1,
+    "randomized_cprs_include_graph": 1,
+    "odol_nan_sentinel_equivalence": 1,
+    "odol_proxy_face_preservation": 1,
+    "odol55_animation_flag_alignment": 1,
+    "odol_model_section_recovery": 1
+  }
+}
